@@ -6,7 +6,7 @@ import { network } from "hardhat";
 const { viem, networkHelpers } = await network.create();
 
 const ENCRYPTED_HASH = keccak256(toHex("encryptedData"));
-const PUBLIC_URI = "ipfs://QmPublicMeta";
+const PUBLIC_URI = "zerog://0xPublicMetaHash";
 
 describe("AgentNFT", function () {
   async function deployFixture() {
