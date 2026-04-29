@@ -7,7 +7,7 @@ const { viem, networkHelpers } = await network.create();
 
 describe('ReputationRegistry', function () {
   async function deployFixture() {
-    const identity = await viem.deployContract('IdentityRegistry');
+    const identity = await viem.deployContract('AgentRegistry');
     const rep = await viem.deployContract('ReputationRegistry');
     await rep.write.initialize([identity.address]);
     const [alice, bob, charlie] = await viem.getWalletClients();
@@ -21,7 +21,7 @@ describe('ReputationRegistry', function () {
 
   it('initialize: sets identity registry', async function () {
     const { identity, rep } = await networkHelpers.loadFixture(deployFixture);
-    assert.equal((await rep.read.getIdentityRegistry()).toLowerCase(), identity.address.toLowerCase());
+    assert.equal((await rep.read.getAgentRegistry()).toLowerCase(), identity.address.toLowerCase());
   });
 
   it('initialize: reverts on second call', async function () {

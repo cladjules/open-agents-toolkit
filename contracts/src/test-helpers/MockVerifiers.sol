@@ -12,6 +12,7 @@ contract AlwaysPassVerifier is IAgentDataVerifier {
         address,
         address,
         bytes32,
+        bytes32,
         bytes calldata
     ) external pure override returns (bool) {
         return true;
@@ -26,6 +27,7 @@ contract AlwaysFailVerifier is IAgentDataVerifier {
         uint256,
         address,
         address,
+        bytes32,
         bytes32,
         bytes calldata
     ) external pure override returns (bool) {

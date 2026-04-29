@@ -3,9 +3,11 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-interface IIdentityRegistryForReputation {
+interface IAgentRegistryForReputation {
     function ownerOf(uint256 tokenId) external view returns (address);
+
     function isApprovedForAll(address owner, address operator) external view returns (bool);
+
     function getApproved(uint256 tokenId) external view returns (address);
 }
 
@@ -35,7 +37,7 @@ contract ReputationRegistry is ReentrancyGuard {
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
-    address private _identityRegistry;
+    address private _agentRegistry;
     bool private _initialized;
 
     /// @dev agentId => clientAddress => feedbackIndex (1-based) => FeedbackRecord
@@ -69,11 +71,7 @@ contract ReputationRegistry is ReentrancyGuard {
         bytes32 feedbackHash
     );
 
-    event FeedbackRevoked(
-        uint256 indexed agentId,
-        address indexed clientAddress,
-        uint64 indexed feedbackIndex
-    );
+    event FeedbackRevoked(uint256 indexed agentId, address indexed clientAddress, uint64 indexed feedbackIndex);
 
     event ResponseAppended(
         uint256 indexed agentId,
@@ -94,21 +92,21 @@ contract ReputationRegistry is ReentrancyGuard {
 
     // ─── Initialize ───────────────────────────────────────────────────────────
 
-    function initialize(address identityRegistry_) external {
+    function initialize(address agentRegistry_) external {
         if (_initialized) revert AlreadyInitialized();
         _initialized = true;
-        _identityRegistry = identityRegistry_;
+        _agentRegistry = agentRegistry_;
     }
 
-    function getIdentityRegistry() external view returns (address) {
-        return _identityRegistry;
+    function getAgentRegistry() external view returns (address) {
+        return _agentRegistry;
     }
 
     // ─── Feedback ─────────────────────────────────────────────────────────────
 
     /**
      * @notice Submit feedback for a registered agent.
-     * @param agentId       IdentityRegistry tokenId of the agent.
+     * @param agentId       AgentRegistry tokenId of the agent.
      * @param value         Signed fixed-point feedback value.
      * @param valueDecimals Decimal precision of value (0-18).
      * @param tag1          Optional primary tag (e.g. "starred").
@@ -130,7 +128,7 @@ contract ReputationRegistry is ReentrancyGuard {
         if (valueDecimals > 18) revert InvalidValueDecimals();
 
         // The feedback submitter MUST NOT be the agent owner or an approved operator.
-        IIdentityRegistryForReputation reg = IIdentityRegistryForReputation(_identityRegistry);
+        IAgentRegistryForReputation reg = IAgentRegistryForReputation(_agentRegistry);
         address agentOwner = reg.ownerOf(agentId);
         if (
             msg.sender == agentOwner ||
@@ -173,8 +171,7 @@ contract ReputationRegistry is ReentrancyGuard {
      * @dev Only the original clientAddress can revoke their own feedback.
      */
     function revokeFeedback(uint256 agentId, uint64 feedbackIndex) external {
-        if (feedbackIndex == 0 || _lastIndex[agentId][msg.sender] < feedbackIndex)
-            revert FeedbackNotFound();
+        if (feedbackIndex == 0 || _lastIndex[agentId][msg.sender] < feedbackIndex) revert FeedbackNotFound();
         _feedback[agentId][msg.sender][feedbackIndex].isRevoked = true;
         emit FeedbackRevoked(agentId, msg.sender, feedbackIndex);
     }
@@ -190,8 +187,7 @@ contract ReputationRegistry is ReentrancyGuard {
         string calldata responseURI,
         bytes32 responseHash
     ) external {
-        if (feedbackIndex == 0 || _lastIndex[agentId][clientAddress] < feedbackIndex)
-            revert FeedbackNotFound();
+        if (feedbackIndex == 0 || _lastIndex[agentId][clientAddress] < feedbackIndex) revert FeedbackNotFound();
         if (!_hasResponded[agentId][clientAddress][feedbackIndex][msg.sender]) {
             _hasResponded[agentId][clientAddress][feedbackIndex][msg.sender] = true;
             ++_responseCount[agentId][clientAddress][feedbackIndex];
@@ -250,13 +246,11 @@ contract ReputationRegistry is ReentrancyGuard {
         uint256 agentId,
         address clientAddress,
         uint64 feedbackIndex
-    ) external view returns (
-        int128 value,
-        uint8 valueDecimals,
-        string memory tag1,
-        string memory tag2,
-        bool isRevoked
-    ) {
+    )
+        external
+        view
+        returns (int128 value, uint8 valueDecimals, string memory tag1, string memory tag2, bool isRevoked)
+    {
         FeedbackRecord storage r = _feedback[agentId][clientAddress][feedbackIndex];
         return (r.value, r.valueDecimals, r.tag1, r.tag2, r.isRevoked);
     }
@@ -272,15 +266,19 @@ contract ReputationRegistry is ReentrancyGuard {
         string calldata tag1,
         string calldata tag2,
         bool includeRevoked
-    ) external view returns (
-        address[] memory clients,
-        uint64[] memory feedbackIndexes,
-        int128[] memory values,
-        uint8[] memory valueDecimalsList,
-        string[] memory tag1s,
-        string[] memory tag2s,
-        bool[] memory revokedStatuses
-    ) {
+    )
+        external
+        view
+        returns (
+            address[] memory clients,
+            uint64[] memory feedbackIndexes,
+            int128[] memory values,
+            uint8[] memory valueDecimalsList,
+            string[] memory tag1s,
+            string[] memory tag2s,
+            bool[] memory revokedStatuses
+        )
+    {
         bool filterTag1 = bytes(tag1).length > 0;
         bool filterTag2 = bytes(tag2).length > 0;
         bytes32 tag1Hash = filterTag1 ? keccak256(bytes(tag1)) : bytes32(0);

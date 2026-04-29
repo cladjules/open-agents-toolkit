@@ -5,9 +5,9 @@ import { network } from 'hardhat';
 
 const { viem, networkHelpers } = await network.create();
 
-describe('IdentityRegistry', function () {
+describe('AgentRegistry', function () {
   async function deployFixture() {
-    const registry = await viem.deployContract('IdentityRegistry');
+    const registry = await viem.deployContract('AgentRegistry');
     const [alice, bob] = await viem.getWalletClients();
     const publicClient = await viem.getPublicClient();
     return { registry, alice, bob, publicClient };
@@ -87,7 +87,7 @@ describe('IdentityRegistry', function () {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
     const chainId = await publicClient.getChainId();
     const signature = await bob.signTypedData({
-      domain: { name: 'IdentityRegistry', version: '1', chainId, verifyingContract: registry.address },
+      domain: { name: 'AgentRegistry', version: '1', chainId, verifyingContract: registry.address },
       types: { SetAgentWallet: [{ name: 'agentId', type: 'uint256' }, { name: 'newWallet', type: 'address' }, { name: 'deadline', type: 'uint256' }] },
       primaryType: 'SetAgentWallet',
       message: { agentId: id, newWallet: bob.account.address, deadline },
@@ -102,7 +102,7 @@ describe('IdentityRegistry', function () {
     const deadline = 1n;
     const chainId = await publicClient.getChainId();
     const signature = await bob.signTypedData({
-      domain: { name: 'IdentityRegistry', version: '1', chainId, verifyingContract: registry.address },
+      domain: { name: 'AgentRegistry', version: '1', chainId, verifyingContract: registry.address },
       types: { SetAgentWallet: [{ name: 'agentId', type: 'uint256' }, { name: 'newWallet', type: 'address' }, { name: 'deadline', type: 'uint256' }] },
       primaryType: 'SetAgentWallet',
       message: { agentId: 1n, newWallet: bob.account.address, deadline },
@@ -119,7 +119,7 @@ describe('IdentityRegistry', function () {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
     const chainId = await publicClient.getChainId();
     const signature = await alice.signTypedData({
-      domain: { name: 'IdentityRegistry', version: '1', chainId, verifyingContract: registry.address },
+      domain: { name: 'AgentRegistry', version: '1', chainId, verifyingContract: registry.address },
       types: { SetAgentWallet: [{ name: 'agentId', type: 'uint256' }, { name: 'newWallet', type: 'address' }, { name: 'deadline', type: 'uint256' }] },
       primaryType: 'SetAgentWallet',
       message: { agentId: 1n, newWallet: bob.account.address, deadline },
@@ -136,7 +136,7 @@ describe('IdentityRegistry', function () {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
     const chainId = await publicClient.getChainId();
     const signature = await bob.signTypedData({
-      domain: { name: 'IdentityRegistry', version: '1', chainId, verifyingContract: registry.address },
+      domain: { name: 'AgentRegistry', version: '1', chainId, verifyingContract: registry.address },
       types: { SetAgentWallet: [{ name: 'agentId', type: 'uint256' }, { name: 'newWallet', type: 'address' }, { name: 'deadline', type: 'uint256' }] },
       primaryType: 'SetAgentWallet',
       message: { agentId: 1n, newWallet: bob.account.address, deadline },

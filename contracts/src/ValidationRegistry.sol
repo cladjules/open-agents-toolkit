@@ -3,12 +3,27 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-interface IIdentityRegistryForValidation {
+interface IAgentRegistryForValidation {
     function ownerOf(uint256 tokenId) external view returns (address);
 
     function isApprovedForAll(address owner, address operator) external view returns (bool);
 
     function getApproved(uint256 tokenId) external view returns (address);
+}
+
+/**
+ * @dev Optional interface that a contract validator (e.g. TEEVerifier) may implement
+ *      to verify validation responses via oracle attestation.
+ *      When validatorAddress is a contract, ValidationRegistry will call this instead
+ *      of checking msg.sender.
+ */
+interface IValidationOracle {
+    function verifyValidation(
+        uint256 agentId,
+        bytes32 requestHash,
+        uint8 response,
+        bytes calldata proof
+    ) external view returns (bool);
 }
 
 /**
@@ -34,7 +49,7 @@ contract ValidationRegistry is ReentrancyGuard {
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
-    address private _identityRegistry;
+    address private _agentRegistry;
     bool private _initialized;
 
     /// @dev requestHash => ValidationRecord
@@ -75,17 +90,18 @@ contract ValidationRegistry is ReentrancyGuard {
     error RequestNotFound();
     error NotRequestedValidator();
     error InvalidResponse();
+    error OracleVerificationFailed(bytes32 requestHash);
 
     // ─── Initialize ───────────────────────────────────────────────────────────
 
-    function initialize(address identityRegistry_) external {
+    function initialize(address agentRegistry_) external {
         if (_initialized) revert AlreadyInitialized();
         _initialized = true;
-        _identityRegistry = identityRegistry_;
+        _agentRegistry = agentRegistry_;
     }
 
-    function getIdentityRegistry() external view returns (address) {
-        return _identityRegistry;
+    function getAgentRegistry() external view returns (address) {
+        return _agentRegistry;
     }
 
     // ─── Validation Request ───────────────────────────────────────────────────
@@ -94,7 +110,7 @@ contract ValidationRegistry is ReentrancyGuard {
      * @notice Request validation of agent work.
      * @dev MUST be called by the owner or operator of agentId.
      * @param validatorAddress The validator contract/address designated to respond.
-     * @param agentId          IdentityRegistry tokenId of the agent.
+     * @param agentId          AgentRegistry tokenId of the agent.
      * @param requestURI       Off-chain URI with inputs/outputs needed by the validator.
      * @param requestHash      keccak256 commitment to the request payload.
      */
@@ -104,7 +120,7 @@ contract ValidationRegistry is ReentrancyGuard {
         string calldata requestURI,
         bytes32 requestHash
     ) external {
-        IIdentityRegistryForValidation reg = IIdentityRegistryForValidation(_identityRegistry);
+        IAgentRegistryForValidation reg = IAgentRegistryForValidation(_agentRegistry);
         address agentOwner = reg.ownerOf(agentId);
         if (
             msg.sender != agentOwner &&
@@ -130,33 +146,59 @@ contract ValidationRegistry is ReentrancyGuard {
 
     /**
      * @notice Submit a validation response for a pending request.
-     * @dev MUST be called by the validatorAddress from the original request.
+     * @dev For EOA validators: msg.sender must equal the validatorAddress from the request.
+     *      For contract validators (e.g. TEEVerifier): proof must be a valid oracle attestation
+     *      verified via IValidationOracle.verifyValidation().
      *      May be called multiple times (progressive finality).
      * @param requestHash  Identifies the request.
      * @param response     Score 0-100 (0 = fail, 100 = pass, or intermediate).
      * @param responseURI  Optional off-chain evidence URI (emitted only).
      * @param responseHash Optional keccak256 of responseURI content.
      * @param tag          Optional custom tag (stored on-chain).
+     * @param proof        Empty for EOA validators; 65-byte ECDSA oracle signature for contract validators.
      */
     function validationResponse(
         bytes32 requestHash,
         uint8 response,
         string calldata responseURI,
         bytes32 responseHash,
-        string calldata tag
+        string calldata tag,
+        bytes calldata proof
     ) external {
         if (!_requestExists[requestHash]) revert RequestNotFound();
         if (response > 100) revert InvalidResponse();
 
         ValidationRecord storage record = _validations[requestHash];
-        if (record.validatorAddress != msg.sender) revert NotRequestedValidator();
+        address validatorAddress = record.validatorAddress;
+
+        if (validatorAddress.code.length > 0) {
+            // Contract validator: verify via IValidationOracle (e.g. TEEVerifier).
+            bool valid = IValidationOracle(validatorAddress).verifyValidation(
+                record.agentId,
+                requestHash,
+                response,
+                proof
+            );
+            if (!valid) revert OracleVerificationFailed(requestHash);
+        } else {
+            // EOA validator: caller must be the designated validator.
+            if (validatorAddress != msg.sender) revert NotRequestedValidator();
+        }
 
         record.response = response;
         record.responseHash = responseHash;
         record.tag = tag;
         record.lastUpdate = block.timestamp;
 
-        emit ValidationResponse(msg.sender, record.agentId, requestHash, response, responseURI, responseHash, tag);
+        emit ValidationResponse(
+            validatorAddress,
+            record.agentId,
+            requestHash,
+            response,
+            responseURI,
+            responseHash,
+            tag
+        );
     }
 
     // ─── Read Functions ───────────────────────────────────────────────────────

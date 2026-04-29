@@ -8,7 +8,7 @@ const { viem, networkHelpers } = await network.create();
 describe("TEEVerifier", function () {
   async function deployFixture() {
     const verifier = await viem.deployContract("TEEVerifier");
-    const nft = await viem.deployContract("AgentNFT", [0n]);
+    const nft = await viem.deployContract("AgentRegistry");
     const [owner, oracle, bob] = await viem.getWalletClients();
     return { verifier, nft, owner, oracle, bob };
   }
@@ -41,10 +41,11 @@ describe("TEEVerifier", function () {
     // Build a valid proof then remove oracle before calling secureTransfer.
     const tokenId = 1n;
     const encDataHash = await nft.read.getEncryptedDataHash([tokenId]);
+    const newDataHash = keccak256(encodePacked(["string"], ["new-enc"]));
     const msgHash = keccak256(
       encodePacked(
-        ["uint256", "address", "address", "bytes32"],
-        [tokenId, owner.account.address, bob.account.address, encDataHash],
+        ["uint256", "address", "address", "bytes32", "bytes32"],
+        [tokenId, owner.account.address, bob.account.address, encDataHash, newDataHash],
       ),
     );
 
@@ -54,7 +55,7 @@ describe("TEEVerifier", function () {
     await verifier.write.removeOracle([oracle.account.address], { account: owner.account });
 
     await viem.assertions.revertWithCustomError(
-      nft.write.secureTransfer([tokenId, bob.account.address, proof], {
+      nft.write.secureTransfer([tokenId, bob.account.address, newDataHash, "0x", proof], {
         account: owner.account,
       }),
       nft,
@@ -73,12 +74,13 @@ describe("TEEVerifier", function () {
 
     const tokenId = 1n;
     const encDataHash = await nft.read.getEncryptedDataHash([tokenId]);
+    const newDataHash = keccak256(encodePacked(["string"], ["new-enc"]));
 
-    // Reproduce on-chain hash: keccak256(abi.encodePacked(tokenId, from, to, encDataHash))
+    // Reproduce on-chain hash: keccak256(abi.encodePacked(tokenId, from, to, oldDataHash, newDataHash))
     const msgHash = keccak256(
       encodePacked(
-        ["uint256", "address", "address", "bytes32"],
-        [tokenId, owner.account.address, bob.account.address, encDataHash],
+        ["uint256", "address", "address", "bytes32", "bytes32"],
+        [tokenId, owner.account.address, bob.account.address, encDataHash, newDataHash],
       ),
     );
 
@@ -86,7 +88,7 @@ describe("TEEVerifier", function () {
     const proof = await oracle.signMessage({ message: { raw: toBytes(msgHash) } });
 
     // secureTransfer uses verifyReEncryption internally — no revert = valid
-    await nft.write.secureTransfer([tokenId, bob.account.address, proof], {
+    await nft.write.secureTransfer([tokenId, bob.account.address, newDataHash, "0x", proof], {
       account: owner.account,
     });
 
@@ -107,16 +109,17 @@ describe("TEEVerifier", function () {
 
     const tokenId = 1n;
     const encDataHash = await nft.read.getEncryptedDataHash([tokenId]);
+    const newDataHash = keccak256(encodePacked(["string"], ["new-enc"]));
     const msgHash = keccak256(
       encodePacked(
-        ["uint256", "address", "address", "bytes32"],
-        [tokenId, owner.account.address, bob.account.address, encDataHash],
+        ["uint256", "address", "address", "bytes32", "bytes32"],
+        [tokenId, owner.account.address, bob.account.address, encDataHash, newDataHash],
       ),
     );
     const proof = await oracle.signMessage({ message: { raw: toBytes(msgHash) } });
 
     await viem.assertions.revertWithCustomError(
-      nft.write.secureTransfer([tokenId, bob.account.address, proof], {
+      nft.write.secureTransfer([tokenId, bob.account.address, newDataHash, "0x", proof], {
         account: owner.account,
       }),
       nft,
@@ -134,7 +137,7 @@ describe("TEEVerifier", function () {
 
     // InvalidProofLength is thrown by TEEVerifier and bubbles through AgentNFT
     await viem.assertions.revertWithCustomError(
-      nft.write.secureTransfer([1n, bob.account.address, toHex("short")], {
+      nft.write.secureTransfer([1n, bob.account.address, keccak256(toHex("x")), "0x", toHex("short")], {
         account: owner.account,
       }),
       verifier,

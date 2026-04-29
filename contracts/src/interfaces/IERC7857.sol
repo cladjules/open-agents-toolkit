@@ -83,10 +83,28 @@ interface IERC7857 {
      */
     function iMint(address to, IntelligentData[] calldata datas) external payable returns (uint256 tokenId);
 
+    // ─── Events — secure transfer ─────────────────────────────────────────────
+
+    /// @notice Emitted by secureTransfer so the new owner can locate their sealed key on-chain.
+    event SealedKeyPublished(uint256 indexed tokenId, address indexed to, bytes sealedKey);
+
     // ─── Transfers ────────────────────────────────────────────────────────────
 
-    /// @notice Transfer with a raw re-encryption proof validated by IAgentDataVerifier.
-    function secureTransfer(uint256 tokenId, address to, bytes calldata reEncryptionProof) external;
+    /**
+     * @notice Transfer with TEE/ZKP re-encryption proof.
+     * @param tokenId     Token being transferred.
+     * @param to          New owner.
+     * @param newDataHash keccak256 of metadata re-encrypted for `to` (replaces old hash on-chain).
+     * @param sealedKey   New encryption key sealed with the receiver's public key (emitted for receiver).
+     * @param proof       65-byte ECDSA oracle attestation over (tokenId, from, to, oldDataHash, newDataHash).
+     */
+    function secureTransfer(
+        uint256 tokenId,
+        address to,
+        bytes32 newDataHash,
+        bytes calldata sealedKey,
+        bytes calldata proof
+    ) external;
 
     /// @notice Transfer using structured TransferValidityProofs (0g AgenticID style).
     function iTransferFrom(address from, address to, uint256 tokenId, TransferValidityProof[] calldata proofs) external;
@@ -147,18 +165,20 @@ interface IERC7857 {
  */
 interface IAgentDataVerifier {
     /**
-     * @param tokenId           The token being transferred.
-     * @param from              Current owner.
-     * @param to                New owner.
-     * @param encryptedDataHash The current on-chain data hash.
-     * @param proof             Opaque proof bytes (TEE attestation or ZK proof).
-     * @return valid            True iff the proof is valid.
+     * @param tokenId       The token being transferred.
+     * @param from          Current owner.
+     * @param to            New owner.
+     * @param oldDataHash   The current on-chain encrypted data hash.
+     * @param newDataHash   The re-encrypted data hash for the new owner.
+     * @param proof         Opaque proof bytes (TEE attestation or ZK proof).
+     * @return valid        True iff the proof is valid.
      */
     function verifyReEncryption(
         uint256 tokenId,
         address from,
         address to,
-        bytes32 encryptedDataHash,
+        bytes32 oldDataHash,
+        bytes32 newDataHash,
         bytes calldata proof
     ) external view returns (bool valid);
 }

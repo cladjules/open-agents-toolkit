@@ -1,27 +1,20 @@
 import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
+import DeployModule from "./Deploy.js";
 
 /**
  * AddOracle — Register a 0G Compute TDX node's ECDSA signing address with TEEVerifier.
  *
- * Run after the main Deploy module:
+ * Ignition resolves the TEEVerifier address automatically from the prior Deploy run.
  *
- *   TEE_VERIFIER_ADDRESS=0x... TDX_ORACLE_ADDRESS=0x... \
- *     npx hardhat ignition deploy ignition/modules/AddOracle.ts --network sepolia
- *
- * The TDX_ORACLE_ADDRESS is the ECDSA address derivable from a 0G Compute provider's
- * attestation report. Discover providers with ZeroGComputeClient.listServices().
+ * Run after Deploy:
+ *   npm run addOracle:zeroG -- --parameters '{"oracleAddress":"0x..."}'
  */
 export default buildModule("AddOracle", (m) => {
-  const verifierAddress = m.getParameter<string>(
-    "teeVerifierAddress",
-    process.env.TEE_VERIFIER_ADDRESS ?? "",
-  );
-  const oracleAddress = m.getParameter<string>(
-    "oracleAddress",
-    process.env.TDX_ORACLE_ADDRESS ?? "",
-  );
+  const { teeVerifier } = m.useModule(DeployModule);
 
-  const teeVerifier = m.contractAt("TEEVerifier", verifierAddress as `0x${string}`);
+  const oracleAddress = m.getParameter("oracleAddress");
+
+  // contractAt narrows the type to ContractDeploymentFuture, which m.call requires.
   m.call(teeVerifier, "addOracle", [oracleAddress], { id: "RegisterOracle" });
 
   return { teeVerifier };

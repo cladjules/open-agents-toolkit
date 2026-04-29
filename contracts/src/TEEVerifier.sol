@@ -20,10 +20,10 @@ import "./interfaces/IERC7857.sol";
  *     1. AgentNFT owner calls ZeroGComputeClient.requestReEncryption() with
  *        the AES content key and new owner's secp256k1 public key.
  *     2. The TDX enclave re-encrypts the content key for the new owner.
- *     3. The enclave signs keccak256(tokenId, from, to, encryptedDataHash)
+ *     3. The enclave signs keccak256(tokenId, from, to, oldDataHash, newDataHash)
  *        with its TDX ECDSA key using EIP-191 personalSign.
- *     4. The signature (65 bytes) is returned as the re-encryption proof.
- *     5. Caller passes the proof to AgentNFT.secureTransfer().
+ *     4. The enclave returns newDataHash, sealedKey, and the 65-byte proof.
+ *     5. Caller passes all three to AgentNFT.secureTransfer().
  *
  *   On-chain flow (this contract):
  *     verifyReEncryption() recovers the signer from the proof and checks
@@ -77,21 +77,53 @@ contract TEEVerifier is IAgentDataVerifier, Ownable {
      * @inheritdoc IAgentDataVerifier
      *
      * @dev The proof is an ECDSA signature over:
-     *   keccak256(abi.encodePacked(tokenId, from, to, encryptedDataHash))
+     *   keccak256(abi.encodePacked(tokenId, from, to, oldDataHash, newDataHash))
      *
-     * Signed by an authorised TEE oracle.
+     * Signed by an authorised TEE oracle using EIP-191 personalSign.
+     * The TEE attests that:
+     *   1. It received data identified by oldDataHash
+     *   2. Re-encrypted it to produce newDataHash
+     *   3. Sealed the new key for the receiver
      */
     function verifyReEncryption(
         uint256 tokenId,
         address from,
         address to,
-        bytes32 encryptedDataHash,
+        bytes32 oldDataHash,
+        bytes32 newDataHash,
         bytes calldata proof
     ) external view override returns (bool valid) {
         if (proof.length != 65) revert InvalidProofLength();
 
         bytes32 digest = keccak256(
-            abi.encodePacked("\x19Ethereum Signed Message:\n32", _buildHash(tokenId, from, to, encryptedDataHash))
+            abi.encodePacked(
+                "\x19Ethereum Signed Message:\n32",
+                keccak256(abi.encodePacked(tokenId, from, to, oldDataHash, newDataHash))
+            )
+        );
+
+        address signer = _recover(digest, proof);
+        return _oracles[signer];
+    }
+
+    /**
+     * @notice Verify a TEE-attested validation response.
+     * @dev The oracle signs keccak256(abi.encodePacked(agentId, requestHash, response))
+     *      using EIP-191 personalSign.  The 65-byte ECDSA signature is the proof.
+     */
+    function verifyValidation(
+        uint256 agentId,
+        bytes32 requestHash,
+        uint8 response,
+        bytes calldata proof
+    ) external view returns (bool valid) {
+        if (proof.length != 65) revert InvalidProofLength();
+
+        bytes32 digest = keccak256(
+            abi.encodePacked(
+                "\x19Ethereum Signed Message:\n32",
+                keccak256(abi.encodePacked(agentId, requestHash, response))
+            )
         );
 
         address signer = _recover(digest, proof);
@@ -99,15 +131,6 @@ contract TEEVerifier is IAgentDataVerifier, Ownable {
     }
 
     // ─── Private ──────────────────────────────────────────────────────────────
-
-    function _buildHash(
-        uint256 tokenId,
-        address from,
-        address to,
-        bytes32 encryptedDataHash
-    ) private pure returns (bytes32) {
-        return keccak256(abi.encodePacked(tokenId, from, to, encryptedDataHash));
-    }
 
     function _recover(bytes32 digest, bytes calldata sig) private pure returns (address) {
         bytes32 r;

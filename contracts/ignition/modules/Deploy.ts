@@ -2,40 +2,33 @@ import { buildModule } from "@nomicfoundation/hardhat-ignition/modules";
 
 /**
  * Deploys all open-agents-toolkit contracts:
- *   - IdentityRegistry   (ERC-8004 identity)
+ *   - AgentRegistry      (ERC-8004 identity + ERC-7857 agent NFT — unified)
  *   - ReputationRegistry (ERC-8004 reputation)
  *   - ValidationRegistry (ERC-8004 validation)
- *   - TEEVerifier        (ECDSA oracle verifier for ERC-7857 transfers)
- *                        Use a 0G Compute TDX node as the oracle — call
- *                        addOracle(<TDX_SIGNING_ADDRESS>) after deployment.
- *   - AgentNFT           (ERC-7857 agent NFT)
+ *   - TEEVerifier        (ECDSA oracle verifier for ERC-7857 secure transfers)
  *
  * Run:
- *   npm hardhat ignition deploy ignition/modules/Deploy.ts
- *   npm hardhat ignition deploy ignition/modules/Deploy.ts --network sepolia
+ *   npm run deploy:zeroG
+ *
+ * To register a TEE oracle after deploy:
+ *   npm run addOracle:zeroG 
  */
 export default buildModule("OpenAgentsToolkit", (m) => {
-  // ── ERC-8004 Registry contracts ────────────────────────────────────────────
-  const identityRegistry = m.contract("IdentityRegistry");
+  // ── ERC-8004 + ERC-7857 unified registry ──────────────────────────────────
+  const agentRegistry = m.contract("AgentRegistry");
   const reputationRegistry = m.contract("ReputationRegistry");
   const validationRegistry = m.contract("ValidationRegistry");
 
-  // Wire up reputation and validation registries to the identity registry.
-  m.call(reputationRegistry, "initialize", [identityRegistry], { id: "InitReputation" });
-  m.call(validationRegistry, "initialize", [identityRegistry], { id: "InitValidation" });
+  m.call(reputationRegistry, "initialize", [agentRegistry], { id: "InitReputation" });
+  m.call(validationRegistry, "initialize", [agentRegistry], { id: "InitValidation" });
 
-  // ── ERC-7857 verifiers & NFT ───────────────────────────────────────────────
-  // TEEVerifier: oracle must be a registered address (e.g. a 0G Compute TDX node).
-  // After deployment, call teeVerifier.addOracle(<TDX_SIGNING_ADDRESS>).
+  // ── ERC-7857 verifier ──────────────────────────────────────────────────────
   const teeVerifier = m.contract("TEEVerifier");
 
-  const agentNFT = m.contract("AgentNFT", [0n]);
-
   return {
-    identityRegistry,
+    agentRegistry,
     reputationRegistry,
     validationRegistry,
     teeVerifier,
-    agentNFT,
   };
 });
