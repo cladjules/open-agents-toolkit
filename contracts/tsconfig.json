@@ -9,7 +9,9 @@
     "skipLibCheck": true,
     "moduleResolution": "node16",
     "outDir": "dist",
+    "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["./**/*.ts"]
+  "include": ["./**/*.ts"],
+  "exclude": ["scripts/**"]
 }

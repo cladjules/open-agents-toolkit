@@ -5,28 +5,31 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "hardhat build",
+    "build": "hardhat build && node scripts/gen-abis.mjs",
     "test": "hardhat test",
     "test:node": "hardhat test nodejs",
     "clean": "hardhat clean",
     "node": "hardhat node",
-    "deploy:sepolia": "hardhat ignition deploy ignition/modules/Deploy.ts --network sepolia",
-    "deploy:zeroG": "hardhat ignition deploy ignition/modules/Deploy.ts --network zeroGGalileo",
-    "addOracle:sepolia": "hardhat ignition deploy ignition/modules/AddOracle.ts --network sepolia",
-    "addOracle:zeroG": "hardhat ignition deploy ignition/modules/AddOracle.ts --network zeroGGalileo --parameters ignition/parameters.zeroG.json --reset",
-    "oracle:start": "node --import tsx/esm scripts/oracle-server.ts",
-    "e2e:zeroG": "node --import tsx/esm scripts/e2e.ts"
+    "deploy:sepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network sepolia --reset",
+    "deploy:zeroG": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network zeroGGalileo --reset",
+    "addOracle:sepolia": "yes | hardhat ignition deploy ignition/modules/AddOracle.ts --network sepolia",
+    "addOracle:zeroG": "yes | hardhat ignition deploy ignition/modules/AddOracle.ts --network zeroGGalileo --parameters ignition/parameters.zeroG.json --reset",
+    "e2e:zeroG": "node --import tsx/esm scripts/e2e.ts",
+    "setup-env": "node scripts/setup-env.mjs",
+    "setup-env:zeroG": "node scripts/setup-env.mjs 16602",
+    "setup-env:sepolia": "node scripts/setup-env.mjs 11155111"
   },
   "devDependencies": {
+    "@open-agents-toolkit/agent-nft": "file:../packages/agent-nft",
     "@open-agents-toolkit/compute": "file:../packages/compute",
     "@nomicfoundation/hardhat-ignition": "^3.1.3",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.4",
     "@openzeppelin/contracts": "^5.6.1",
-    "@types/node": "^22.19.17",
+    "@types/node": "^25.6.0",
     "dotenv": "^17.4.2",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
     "hardhat": "^3.4.1",
-    "typescript": "~5.8.0",
+    "typescript": "^6.0.3",
     "viem": "^2.48.4"
   }
 }

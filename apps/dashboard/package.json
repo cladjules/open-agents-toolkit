@@ -1,0 +1,32 @@
+{
+  "name": "@open-agents-toolkit/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "DEBUG=* & next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .next .turbo"
+  },
+  "dependencies": {
+    "@open-agents-toolkit/core": "file:../../packages/core",
+    "@open-agents-toolkit/ows": "file:../../packages/ows",
+    "@open-agents-toolkit/agent-nft": "file:../../packages/agent-nft",
+    "next": "16.2.4",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
+    "viem": "^2.48.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.4",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^6.0.3"
+  }
+}

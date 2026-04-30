@@ -10,7 +10,7 @@ export default defineConfig({
   solidity: {
     profiles: {
       default: {
-        version: "0.8.28",
+        version: "0.8.35",
         settings: {
           viaIR: true,
           optimizer: {
@@ -20,7 +20,7 @@ export default defineConfig({
         },
       },
       production: {
-        version: "0.8.28",
+        version: "0.8.35",
         settings: {
           viaIR: true,
           optimizer: {
