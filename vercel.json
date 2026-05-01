@@ -2,6 +2,5 @@
   "buildCommand": "npm run build",
   "outputDirectory": "apps/dashboard/.next",
   "installCommand": "npm ci",
-  "framework": "nextjs",
-  "nodeVersion": "20.x"
+  "framework": "nextjs"
 }
