@@ -25,9 +25,11 @@ interface IAgentRegistry is IERC721 {
     event CreatorSet(uint256 indexed tokenId, address indexed creator);
     event BaseURIUpdated(string oldBaseURI, string newBaseURI);
     event TokenURIUpdated(uint256 indexed tokenId, string newURI);
+    event MetadataURIUpdated(uint256 indexed tokenId, string newURI);
     event VerifierUpdated(address indexed oldVerifier, address indexed newVerifier);
     event MintFeeUpdated(uint256 oldFee, uint256 newFee);
     event IntelligentDataSet(uint256 indexed tokenId, IntelligentData[] data);
+    event PublishedSealedKey(address indexed to, uint256 indexed tokenId, bytes[] sealedKeys);
     /// @notice ERC-8004: emitted on agent registration (mint).
     event Registered(uint256 indexed agentId, string agentURI, address indexed owner);
     /// @notice ERC-8004: emitted when the agent wallet is updated or cleared.
@@ -38,18 +40,14 @@ interface IAgentRegistry is IERC721 {
     /// @notice Mint an agent NFT.
     /// @param to Recipient address.
     /// @param publicMetadataUri Public metadata URI stored as ERC-721 tokenURI (with image, description, traits).
-    /// @param encryptedDataHash Keccak-256 hash of the encrypted private metadata blob,
-    ///        or bytes32(0) for a plain ERC-721 token.
-    /// @param verifierAddr Address of the IAgentDataVerifier to use for secure transfers,
-    ///        or address(0) if no private data is attached.
     /// @param metadataUri ERC-8004 metadata registry file URI (uploaded to 0G storage).
+    /// @param newDatas Optional intelligent data (encrypted metadata) to attach at mint time.
     /// @return tokenId Newly minted token ID.
     function mint(
         address to,
         string calldata publicMetadataUri,
-        bytes32 encryptedDataHash,
-        address verifierAddr,
-        string calldata metadataUri
+        string calldata metadataUri,
+        IntelligentData[] calldata newDatas
     ) external payable returns (uint256 tokenId);
 
     // ─── Secure Transfer ──────────────────────────────────────────────────────
@@ -57,24 +55,22 @@ interface IAgentRegistry is IERC721 {
     /// @notice Transfer ownership with TEE-attested re-encryption proof.
     /// @param tokenId Token to transfer.
     /// @param to New owner.
-    /// @param newDataHash Hash of the data re-encrypted for the new owner.
+    /// @param newDataHashes Hashes of the intelligent data items re-encrypted for the new owner.
     /// @param sealedKey Encrypted content key sealed for the new owner (logged off-chain).
-    /// @param proof 65-byte ECDSA TEE proof over (tokenId, from, to, oldDataHash, newDataHash).
+    /// @param proof 65-byte ECDSA TEE proof over (tokenId, from, to, oldDataHashes, newDataHashes).
     function secureTransfer(
         uint256 tokenId,
         address to,
-        bytes32 newDataHash,
+        bytes32[] calldata newDataHashes,
         bytes calldata sealedKey,
         bytes calldata proof
     ) external;
 
     // ─── Data Accessors ───────────────────────────────────────────────────────
 
-    function getEncryptedDataHash(uint256 tokenId) external view returns (bytes32);
-
-    function updateEncryptedData(uint256 tokenId, bytes32 newHash) external;
-
     function intelligentDataOf(uint256 tokenId) external view returns (IntelligentData[] memory);
+
+    function updateIntelligentData(uint256 tokenId, IntelligentData[] calldata newDatas) external;
 
     function tokenVerifier(uint256 tokenId) external view returns (address);
 

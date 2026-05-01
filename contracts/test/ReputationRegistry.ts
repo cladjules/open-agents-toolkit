@@ -1,34 +1,37 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { zeroHash } from 'viem';
+import { zeroAddress, zeroHash } from 'viem';
 import { network } from 'hardhat';
 
 const { viem, networkHelpers } = await network.create();
 
 describe('ReputationRegistry', function () {
   async function deployFixture() {
-    const identity = await viem.deployContract('AgentRegistry');
-    const rep = await viem.deployContract('ReputationRegistry');
-    await rep.write.initialize([identity.address]);
     const [alice, bob, charlie] = await viem.getWalletClients();
+    const identity = await viem.deployContract('AgentRegistry', [
+      'AgentRegistry',
+      'AGENT',
+      alice.account.address,
+      zeroAddress,
+    ]);
+    const rep = await viem.deployContract('ReputationRegistry', [identity.address]);
 
-    // Register alice as agent #1
-    await identity.write.register(['zerog://0xAgent1Meta'], { account: alice.account });
-    const agentId = 1n;
+    // Mint alice as agent #0
+    await identity.write.mint([alice.account.address, 'zerog://0xAgent1Meta', 'zerog://0xMeta', []], { account: alice.account });
+    const agentId = 0n;
 
     return { identity, rep, alice, bob, charlie, agentId };
   }
 
-  it('initialize: sets identity registry', async function () {
+  it('constructor: sets identity registry', async function () {
     const { identity, rep } = await networkHelpers.loadFixture(deployFixture);
     assert.equal((await rep.read.getAgentRegistry()).toLowerCase(), identity.address.toLowerCase());
   });
 
-  it('initialize: reverts on second call', async function () {
-    const { identity, rep } = await networkHelpers.loadFixture(deployFixture);
-    await viem.assertions.revertWithCustomError(
-      rep.write.initialize([identity.address]),
-      rep, 'AlreadyInitialized',
+  it('constructor: reverts with zero agent registry', async function () {
+    await assert.rejects(
+      viem.deployContract('ReputationRegistry', [zeroAddress]),
+      /Invalid agent registry/,
     );
   });
 

@@ -1,11 +1,11 @@
 {
   "_format": "hh3-sol-build-info-1",
-  "id": "solc-0_8_35-1e0729c1cf3141162e804d51b3e0cc5412aecf3c",
+  "id": "solc-0_8_35-ace0486197b509b81c0b2f045efde6eb9a1ba20a",
   "solcVersion": "0.8.35",
   "solcLongVersion": "0.8.35+commit.47b9dedd",
   "compilerType": "solc",
   "toolVersions": {
-    "hardhat": "3.4.2"
+    "hardhat": "3.4.3"
   },
   "userSourceNameMap": {
     "src/ReputationRegistry.sol": "project/src/ReputationRegistry.sol"

@@ -1,22 +1,120 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { keccak256, encodePacked, toBytes, toHex } from "viem";
+import { encodeAbiParameters, keccak256, toBytes, toHex, zeroAddress } from "viem";
 import { network } from "hardhat";
 
 const { viem, networkHelpers } = await network.create();
 
 describe("TEEVerifier", function () {
+  async function buildTransferProofBytes(params: {
+    oldDataHash: `0x${string}`;
+    newDataHash: `0x${string}`;
+    recipient: { signMessage: (args: { message: { raw: Uint8Array } }) => Promise<`0x${string}`> };
+    oracle: { signMessage: (args: { message: { raw: Uint8Array } }) => Promise<`0x${string}`> };
+  }): Promise<`0x${string}`> {
+    const accessNonce = toHex("access-nonce-1");
+    const ownershipNonce = toHex("ownership-nonce-1");
+    const encryptedPubKey = toHex("recipient-pubkey");
+    const sealedKey = toHex("sealed-key");
+
+    const accessInnerHash = keccak256(
+      encodeAbiParameters(
+        [
+          { type: "bytes32" },
+          { type: "bytes32" },
+          { type: "bytes" },
+          { type: "bytes" },
+        ],
+        [params.oldDataHash, params.newDataHash, encryptedPubKey, accessNonce],
+      ),
+    );
+    const accessProof = await params.recipient.signMessage({ message: { raw: toBytes(accessInnerHash) } });
+
+    const ownershipInnerHash = keccak256(
+      encodeAbiParameters(
+        [
+          { type: "bytes32" },
+          { type: "bytes32" },
+          { type: "bytes" },
+          { type: "bytes" },
+          { type: "bytes" },
+        ],
+        [params.oldDataHash, params.newDataHash, sealedKey, encryptedPubKey, ownershipNonce],
+      ),
+    );
+    const ownershipProof = await params.oracle.signMessage({ message: { raw: toBytes(ownershipInnerHash) } });
+
+    return encodeAbiParameters(
+      [
+        {
+          type: "tuple[]",
+          components: [
+            {
+              name: "accessProof",
+              type: "tuple",
+              components: [
+                { name: "oldDataHash", type: "bytes32" },
+                { name: "newDataHash", type: "bytes32" },
+                { name: "nonce", type: "bytes" },
+                { name: "encryptedPubKey", type: "bytes" },
+                { name: "proof", type: "bytes" },
+              ],
+            },
+            {
+              name: "ownershipProof",
+              type: "tuple",
+              components: [
+                { name: "oracleType", type: "uint8" },
+                { name: "oldDataHash", type: "bytes32" },
+                { name: "newDataHash", type: "bytes32" },
+                { name: "sealedKey", type: "bytes" },
+                { name: "encryptedPubKey", type: "bytes" },
+                { name: "nonce", type: "bytes" },
+                { name: "proof", type: "bytes" },
+              ],
+            },
+          ],
+        },
+      ],
+      [[
+        {
+          accessProof: {
+            oldDataHash: params.oldDataHash,
+            newDataHash: params.newDataHash,
+            nonce: accessNonce,
+            encryptedPubKey,
+            proof: accessProof,
+          },
+          ownershipProof: {
+            oracleType: 0,
+            oldDataHash: params.oldDataHash,
+            newDataHash: params.newDataHash,
+            sealedKey,
+            encryptedPubKey,
+            nonce: ownershipNonce,
+            proof: ownershipProof,
+          },
+        },
+      ]],
+    );
+  }
+
   async function deployFixture() {
-    const verifier = await viem.deployContract("TEEVerifier");
-    const nft = await viem.deployContract("AgentRegistry");
     const [owner, oracle, bob] = await viem.getWalletClients();
+    const verifier = await viem.deployContract("TEEVerifier");
+    const nft = await viem.deployContract("AgentRegistry", [
+      "AgentRegistry",
+      "AGENT",
+      owner.account.address,
+      verifier.address,
+    ]);
     return { verifier, nft, owner, oracle, bob };
   }
 
   it("addOracle: registers an oracle address (owner only)", async function () {
     const { verifier, oracle, owner } = await networkHelpers.loadFixture(deployFixture);
     await verifier.write.addOracle([oracle.account.address], { account: owner.account });
-    // No revert = success; we verify via verifyReEncryption below
+    // No revert = success; we verify via verifySignature below
   });
 
   it("addOracle: reverts if called by non-owner", async function () {
@@ -31,64 +129,61 @@ describe("TEEVerifier", function () {
   it("removeOracle: de-registers oracle so proofs are rejected", async function () {
     const { verifier, nft, oracle, owner, bob } = await networkHelpers.loadFixture(deployFixture);
 
-    // Register oracle, mint, register it, then remove it — transfer should fail.
     await verifier.write.addOracle([oracle.account.address], { account: owner.account });
     await nft.write.mint(
-      [owner.account.address, "zerog://0xPublic", keccak256(toHex("enc")), verifier.address],
+      [owner.account.address, "zerog://0xPublic", "zerog://0xMeta1", []],
       { account: owner.account },
     );
 
-    // Build a valid proof then remove oracle before calling secureTransfer.
-    const tokenId = 1n;
-    const encDataHash = await nft.read.getEncryptedDataHash([tokenId]);
-    const newDataHash = keccak256(encodePacked(["string"], ["new-enc"]));
-    const msgHash = keccak256(
-      encodePacked(
-        ["uint256", "address", "address", "bytes32", "bytes32"],
-        [tokenId, owner.account.address, bob.account.address, encDataHash, newDataHash],
-      ),
+    const tokenId = 0n;
+    const oldDataHashes = [keccak256(toHex("enc"))];
+    const newDataHashes = [keccak256(toHex("new-enc"))];
+    await nft.write.updateIntelligentData(
+      [tokenId, [{ dataDescription: "weights", dataHash: oldDataHashes[0] }]],
+      { account: owner.account },
     );
+    const proof = await buildTransferProofBytes({
+      oldDataHash: oldDataHashes[0],
+      newDataHash: newDataHashes[0],
+      recipient: bob,
+      oracle,
+    });
 
-    const proof = await oracle.signMessage({ message: { raw: toBytes(msgHash) } });
-
-    // Remove oracle — proof must now be rejected.
     await verifier.write.removeOracle([oracle.account.address], { account: owner.account });
 
-    await viem.assertions.revertWithCustomError(
-      nft.write.secureTransfer([tokenId, bob.account.address, newDataHash, "0x", proof], {
+    await assert.rejects(
+      nft.write.secureTransfer([tokenId, bob.account.address, newDataHashes, "0x", proof], {
         account: owner.account,
       }),
-      nft,
-      "VerificationFailed",
+      /Invalid ownership proof/,
     );
   });
 
-  it("verifyReEncryption: returns true for valid oracle signature", async function () {
+  it("secureTransfer: accepts valid TransferValidityProof[]", async function () {
     const { verifier, nft, oracle, owner, bob } = await networkHelpers.loadFixture(deployFixture);
 
     await verifier.write.addOracle([oracle.account.address], { account: owner.account });
     await nft.write.mint(
-      [owner.account.address, "zerog://0xPublic", keccak256(toHex("enc")), verifier.address],
+      [owner.account.address, "zerog://0xPublic", "zerog://0xMeta2", []],
       { account: owner.account },
     );
 
-    const tokenId = 1n;
-    const encDataHash = await nft.read.getEncryptedDataHash([tokenId]);
-    const newDataHash = keccak256(encodePacked(["string"], ["new-enc"]));
-
-    // Reproduce on-chain hash: keccak256(abi.encodePacked(tokenId, from, to, oldDataHash, newDataHash))
-    const msgHash = keccak256(
-      encodePacked(
-        ["uint256", "address", "address", "bytes32", "bytes32"],
-        [tokenId, owner.account.address, bob.account.address, encDataHash, newDataHash],
-      ),
+    const tokenId = 0n;
+    const oldDataHashes = [keccak256(toHex("enc"))];
+    const newDataHashes = [keccak256(toHex("new-enc"))];
+    await nft.write.updateIntelligentData(
+      [tokenId, [{ dataDescription: "weights", dataHash: oldDataHashes[0] }]],
+      { account: owner.account },
     );
 
-    // Sign with personal_sign (EIP-191 prefix applied by signMessage)
-    const proof = await oracle.signMessage({ message: { raw: toBytes(msgHash) } });
+    const proof = await buildTransferProofBytes({
+      oldDataHash: oldDataHashes[0],
+      newDataHash: newDataHashes[0],
+      recipient: bob,
+      oracle,
+    });
 
-    // secureTransfer uses verifyReEncryption internally — no revert = valid
-    await nft.write.secureTransfer([tokenId, bob.account.address, newDataHash, "0x", proof], {
+    await nft.write.secureTransfer([tokenId, bob.account.address, newDataHashes, "0x", proof], {
       account: owner.account,
     });
 
@@ -98,50 +193,53 @@ describe("TEEVerifier", function () {
     );
   });
 
-  it("verifyReEncryption: rejects proof from unregistered signer", async function () {
+  it("secureTransfer: rejects proof from unregistered oracle", async function () {
     const { verifier, nft, oracle, owner, bob } = await networkHelpers.loadFixture(deployFixture);
 
-    // oracle is NOT registered
     await nft.write.mint(
-      [owner.account.address, "zerog://0xPublic", keccak256(toHex("enc")), verifier.address],
+      [owner.account.address, "zerog://0xPublic", "zerog://0xMeta3", []],
       { account: owner.account },
     );
 
-    const tokenId = 1n;
-    const encDataHash = await nft.read.getEncryptedDataHash([tokenId]);
-    const newDataHash = keccak256(encodePacked(["string"], ["new-enc"]));
-    const msgHash = keccak256(
-      encodePacked(
-        ["uint256", "address", "address", "bytes32", "bytes32"],
-        [tokenId, owner.account.address, bob.account.address, encDataHash, newDataHash],
-      ),
+    const tokenId = 0n;
+    const oldDataHashes = [keccak256(toHex("enc"))];
+    const newDataHashes = [keccak256(toHex("new-enc"))];
+    await nft.write.updateIntelligentData(
+      [tokenId, [{ dataDescription: "weights", dataHash: oldDataHashes[0] }]],
+      { account: owner.account },
     );
-    const proof = await oracle.signMessage({ message: { raw: toBytes(msgHash) } });
+    const proof = await buildTransferProofBytes({
+      oldDataHash: oldDataHashes[0],
+      newDataHash: newDataHashes[0],
+      recipient: bob,
+      oracle,
+    });
 
-    await viem.assertions.revertWithCustomError(
-      nft.write.secureTransfer([tokenId, bob.account.address, newDataHash, "0x", proof], {
+    await assert.rejects(
+      nft.write.secureTransfer([tokenId, bob.account.address, newDataHashes, "0x", proof], {
         account: owner.account,
       }),
-      nft,
-      "VerificationFailed",
+      /Invalid ownership proof/,
     );
   });
 
-  it("verifyReEncryption: reverts on invalid proof length", async function () {
+  it("secureTransfer: rejects non-encoded legacy-style proof bytes", async function () {
     const { verifier, nft, owner, bob } = await networkHelpers.loadFixture(deployFixture);
 
     await nft.write.mint(
-      [owner.account.address, "zerog://0xPublic", keccak256(toHex("enc")), verifier.address],
+      [owner.account.address, "zerog://0xPublic", "zerog://0xMeta4", []],
+      { account: owner.account },
+    );
+    await nft.write.updateIntelligentData(
+      [0n, [{ dataDescription: "weights", dataHash: keccak256(toHex("enc")) }]],
       { account: owner.account },
     );
 
-    // InvalidProofLength is thrown by TEEVerifier and bubbles through AgentNFT
-    await viem.assertions.revertWithCustomError(
-      nft.write.secureTransfer([1n, bob.account.address, keccak256(toHex("x")), "0x", toHex("short")], {
+    await assert.rejects(
+      nft.write.secureTransfer([0n, bob.account.address, [keccak256(toHex("x"))], "0x", toHex("short")], {
         account: owner.account,
       }),
-      verifier,
-      "InvalidProofLength",
+      /decode|revert/i,
     );
   });
 });

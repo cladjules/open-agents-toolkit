@@ -37,6 +37,10 @@ export const TEE_VERIFIER_ABI = [
 export const VALIDATION_REGISTRY_ABI = [
   ${readAbi("ValidationRegistry.sol/ValidationRegistry.json")}
 ] as const;
+
+export const ENS_AGENT_REGISTRY_ABI = [
+  ${readAbi("ENSAgentRegistry.sol/ENSAgentRegistry.json")}
+] as const;
 `;
 }
 

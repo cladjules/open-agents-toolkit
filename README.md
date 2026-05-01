@@ -1,6 +1,27 @@
 # Open Agents Toolkit
 
-A TypeScript SDK + CLI that gives any AI agent framework (LangChain, CrewAI, AutoGen, etc.) full Web3 awareness through four integrated modules.
+> A TypeScript / Solidity monorepo for putting AI agents on-chain — identity, reputation, validation, ownable NFT agents with encrypted private metadata, and AI inference via 0G Compute.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8.35-blue)](https://soliditylang.org)
+[![ERC-8004](https://img.shields.io/badge/ERC--8004-Trustless%20Agents-purple)](https://eips.ethereum.org/EIPS/eip-8004)
+[![ERC-7857](https://img.shields.io/badge/ERC--7857-Agent%20NFTs-cyan)](https://eips.ethereum.org/EIPS/eip-7857)
+
+---
+
+## What is it?
+
+Open Agents Toolkit (OAT) is a full-stack system for putting AI agents on-chain. It combines Solidity contracts, a TypeScript SDK, and a Next.js dashboard to cover the complete agent lifecycle:
+
+1. **Register** an agent on-chain with its endpoints, capabilities, and metadata stored on 0G Storage
+2. **Mint** the agent as an ERC-7857 NFT with AES-256-GCM encrypted private metadata (system prompts, API keys, secrets) anchored on-chain via content hashes
+3. **Trade** the NFT — private metadata is re-encrypted for the new owner inside a 0G Compute TDX enclave, verified on-chain by `TEEVerifier`
+4. **Accumulate reputation** via client feedback stored in `ReputationRegistry`
+5. **Request external validation** from TEE oracles, zkML provers, or staker re-execution via `ValidationRegistry`
+6. **Resolve agents via ENS** — `ENSAgentRegistry` mirrors ENS namehash ownership cross-chain
+7. **Run AI inference** through the 0G Compute Network (pay-per-request, OpenAI-compatible API) - Coming soon
+
+**Architecture:** The frontend (Next.js dashboard) owns all contract writes directly via viem. The SDK packages provide read-only clients, encryption/decryption utilities, and server-side helpers for data preparation and 0G Storage interactions.
 
 ---
 
@@ -8,11 +29,243 @@ A TypeScript SDK + CLI that gives any AI agent framework (LangChain, CrewAI, Aut
 
 ```
 open-agents-toolkit/
+├── packages/
+│   ├── core/          # Shared types, error classes, EIP-712 utilities, network config
+│   ├── agent-nft/     # ERC-7857 client: metadata, decryption, ABIs, 0G Storage, server helpers
+│   └── compute/       # 0G Compute: AI inference + TDX re-encryption oracle
+├── contracts/         # Solidity contracts (Hardhat 3 + viaIR)
 │   ├── src/
-│   │   ├── AgentNFT.sol
-│   ├── test/
-│   └── ignition/modules/Deploy.ts
+│   │   ├── AgentRegistry.sol       # ERC-8004 + ERC-721 identity registry
+│   │   ├── ReputationRegistry.sol  # Client feedback with Sybil-resistant scoring
+│   │   ├── ValidationRegistry.sol  # TEE / zkML / staker validation hooks
+│   │   ├── ENSAgentRegistry.sol    # ENS-native registry w/ cross-chain ownership mirror
+│   │   └── TEEVerifier.sol         # ECDSA attestation verifier for TDX oracle proofs
+│   ├── test/          # 60+ tests (node:test + viem)
+│   └── ignition/      # Hardhat Ignition deployment modules
+├── apps/
+│   └── dashboard/     # Next.js 15 App Router — agent management UI
+└── examples/
+    └── langchain-agent/  # LangChain tool integration example
 ```
+
+---
+
+## Smart Contracts
+
+All contracts are per-chain singletons. `ReputationRegistry`, `ValidationRegistry`, and `ENSAgentRegistry` are initialized with the `AgentRegistry` address after deployment.
+
+| Contract             | Standard           | Description                                                                                                                                          |
+| -------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AgentRegistry`      | ERC-8004 / ERC-721 | Core agent identity registry — mint agent NFT, store metadata URI on 0G Storage, register agent wallet with EIP-712 proof, on-chain metadata entries |
+| `ReputationRegistry` | ERC-8004           | Fixed-point client feedback (int128 × 10^decimals), revocations, response URIs, `getSummary` with Sybil-resistant client filtering                   |
+| `ValidationRegistry` | ERC-8004           | Request/response validation for TEE oracles, zkML provers, and staker re-execution; supports progressive finality                                    |
+| `ENSAgentRegistry`   | —                  | ENS namehash-based identity with cross-chain ownership mirror via KeeperHub                                                                          |
+| `TEEVerifier`        | ERC-7857           | ECDSA attestation verifier for 0G Compute TDX oracle signing keys                                                                                    |
+
+Contract ABIs are exported from `@open-agents-toolkit/agent-nft`:
+
+```typescript
+// Server-side
+import {
+  AGENT_REGISTRY_ABI,
+  AGENT_NFT_ABI,
+  REPUTATION_REGISTRY_ABI,
+} from "@open-agents-toolkit/agent-nft";
+
+// Browser / frontend (no Node.js deps)
+import { AGENT_REGISTRY_ABI } from "@open-agents-toolkit/agent-nft/browser";
+```
+
+---
+
+## SDK
+
+### `@open-agents-toolkit/core`
+
+Shared types used by all packages. No runtime dependencies.
+
+```typescript
+import type {
+  AgentIdentity,
+  AgentRegistrationFile,
+  AgentPrivateMetadata,
+  AgentNFTRecord,
+} from "@open-agents-toolkit/core";
+import { NFTError, RegistryError } from "@open-agents-toolkit/core";
+```
+
+---
+
+### `@open-agents-toolkit/agent-nft`
+
+Read-only TypeScript client for ERC-7857 NFT metadata, registry/reputation/validation queries, AES-256-GCM encryption, 0G Storage, and server-side data preparation helpers.
+
+#### `AgentNFTClient` — read encrypted NFT metadata
+
+```typescript
+import { AgentNFTClient } from "@open-agents-toolkit/agent-nft";
+
+const client = new AgentNFTClient({ contractAddress: "0x...", publicClient });
+
+// Fetch on-chain record
+const record = await client.getRecord(tokenId);
+
+// Decrypt private metadata (after receiving content key from TEE transfer)
+client.provideContentKey(tokenId, aesContentKey);
+const { systemPrompt, intelligentData } = await client.loadMetadata(tokenId);
+```
+
+#### `AgentRegistry` — read registry, reputation, and validation
+
+```typescript
+import { AgentRegistry } from "@open-agents-toolkit/agent-nft";
+
+const registry = new AgentRegistry({
+  agentRegistryAddress: "0x...",
+  reputationRegistryAddress: "0x...",
+  validationRegistryAddress: "0x...",
+  publicClient,
+});
+
+// Resolve agent + fetch metadata from 0G Storage or HTTPS
+const agent = await registry.resolve(agentId);
+// → { agentId, owner, agentWallet, metadataUri, metadata: AgentRegistrationFile }
+
+// Reputation
+const entries = await registry.getFeedback(
+  agentId,
+  clientAddresses,
+  tag1,
+  tag2,
+);
+const summary = await registry.getReputationSummary(agentId, clientAddresses);
+
+// Validation
+const status = await registry.getValidationStatus(requestHash);
+```
+
+#### Encryption utilities
+
+```typescript
+import {
+  generateContentKey, // → 32-byte AES key
+  encryptMetadata, // AES-256-GCM encrypt any JSON payload
+  decryptMetadata, // decrypt an EncryptedBlob
+  hashEncryptedBlob, // keccak256 commitment for on-chain anchoring
+  decryptContentKey, // ECIES decrypt sealed content key
+  uploadEncryptedIntelligentData, // encrypt + upload items to 0G Storage
+  buildSecureTransferPayloads, // build TEE oracle request payload
+  buildDecryptMessage, // build EIP-191 message for key request
+  decryptEncryptedBlob, // full decrypt flow after TEE handoff
+  parseAgentServicesJson, // validate/parse AgentService JSON
+  buildAgentServiceTraits, // produce ERC-721 trait attributes
+  readJsonFromUri, // fetch JSON from zerog:// or https://
+} from "@open-agents-toolkit/agent-nft";
+```
+
+**Mint flow (frontend):**
+
+1. Server action: `uploadEncryptedIntelligentData(blobs, zeroGOptions)` → `intelligentData[]` array
+2. Frontend: `AgentNFT.mint(publicMetadataUri, intelligentData, verifierAddress, mintFee)` via viem
+
+**Transfer flow:**
+
+1. Server action: `buildSecureTransferPayloads(...)` → oracle request payload
+2. `ZeroGComputeClient.requestReEncryption(...)` → `{ newDataHashes, sealedKey, proof }`
+3. Frontend: `AgentNFT.secureTransfer(tokenId, newOwner, newDataHashes, sealedKey, proof)` via viem
+
+**Decryption flow (new owner):**
+
+1. Server action: `buildDecryptMessage(tokenId, owner)` → EIP-191 message
+2. Oracle: `decryptEncryptedBlob(encryptedBlob, sealedKey, privateKey)` → plaintext
+
+#### 0G Storage
+
+```typescript
+import {
+  ZeroGStorageClient,
+  readZeroGJSON,
+  readZeroGBytes,
+} from "@open-agents-toolkit/agent-nft";
+
+const storage = new ZeroGStorageClient({
+  privateKey: "0x...",
+  network: "0gTestnet",
+});
+const metadata = await readZeroGJSON<AgentRegistrationFile>(
+  "zerog://0x...",
+  options,
+);
+```
+
+---
+
+### `@open-agents-toolkit/compute`
+
+0G Compute Network client for AI inference and TDX re-encryption oracle.
+
+#### AI inference
+
+```typescript
+import { ZeroGComputeClient } from "@open-agents-toolkit/compute";
+
+const compute = new ZeroGComputeClient({
+  privateKey: process.env.PRIVATE_KEY,
+  network: "0gTestnet",
+});
+await compute.setup();
+
+const { content } = await compute.inference({
+  model: "llama-3.1-8b-instruct",
+  messages: [{ role: "user", content: "Summarise this document..." }],
+});
+```
+
+#### TDX re-encryption oracle (ERC-7857 transfers)
+
+```typescript
+const { newDataHashes, sealedKey, proof } = await compute.requestReEncryption({
+  tokenId,
+  from: currentOwner,
+  to: newOwner,
+  contentKey: aesContentKey,
+  newOwnerPublicKey: newOwnerPubKey,
+  intelligentDataHashes: currentOnChainHashes,
+});
+// Frontend calls: AgentNFT.secureTransfer(tokenId, newOwner, newDataHashes, sealedKey, proof)
+```
+
+Oracle flow:
+
+```
+Client               0G Compute TDX Node                  Chain
+──────               ───────────────────                  ─────
+requestReEncryption()
+  POST /chat/completions {action:"reencrypt", contentKey, ...}
+  ─────────────────────────────────────────>
+                         Re-encrypt under newOwnerPublicKey (ECIES)
+                         Sign (tokenId, from, to, oldHashes, newHashes)
+  <─────────────────────────────────────────
+  AgentNFT.secureTransfer(...)  ──────────────────────>  TEEVerifier.verifySignature()
+```
+
+---
+
+## Dashboard
+
+The `apps/dashboard` Next.js 15 app is the primary UI.
+
+- All contract writes are executed in the browser via viem `writeContract` — no backend proxy
+- Server Actions (`/lib/actions/`) handle data preparation, encryption, and 0G Storage uploads only
+- No API routes for internal use
+
+**Key server actions:**
+
+- `prepareCreateAgent` — upload metadata to 0G, return `intelligentData[]` for frontend mint call
+- `prepareTransferAgent` — call 0G Compute oracle, build `secureTransfer` payload
+- `prepareUpdateServices` — re-encrypt and upload updated service metadata
+- `getRegisteredAgents` / `getAgent` — read agent state from chain and 0G Storage
+- `decryptAgentIntelligentData` — decrypt encrypted blobs after ownership transfer
 
 ---
 
@@ -23,59 +276,94 @@ open-agents-toolkit/
 - Node.js ≥ 20
 - npm ≥ 10
 
-### Install
-
 ```bash
 npm install
 ```
 
-### Run tests
+### Build packages
 
 ```bash
-# All packages + contracts
-npm test
+cd packages && npm run build
+```
 
-# Contracts only
+### Run contract tests
+
+```bash
 cd contracts && npm test
 ```
 
-### Deploy contracts (local Hardhat node)
+### Deploy contracts
+
+**Local Hardhat node:**
 
 ```bash
-# Terminal 1: start local node
-cd contracts && npx hardhat node
-
-# Terminal 2: deploy via Ignition
 cd contracts
-npx hardhat ignition deploy ignition/modules/Deploy.ts --network localhost
+npx hardhat node
+# In a separate terminal:
+npm run deploy -- --network localhost
 ```
 
-## Smart Contracts
+**0G Galileo testnet** (Chain ID 16602):
 
-| Contract   | Description                                                                             |
-| ---------- | --------------------------------------------------------------------------------------- |
-| `AgentNFT` | ERC-7857 Agent NFT — minting, secure transfer, cloning, usage authorization, delegation |
+```bash
+# contracts/.env: ZERO_G_RPC_URL=https://evmrpc-testnet.0g.ai, PRIVATE_KEY
+# Tokens: https://faucet.0g.ai
+npm run deploy:zeroG
+```
 
-### IERC7857 — Unified Interface
+**Sepolia:**
 
-`IERC7857` merges the core ERC-7857 spec, the usage-authorization extension, and the cloning extension into a single interface (following the 0g AgenticID reference).
+```bash
+# contracts/.env: SEPOLIA_RPC_URL, PRIVATE_KEY
+npm run deploy:sepolia
+```
 
-| Group         | Functions / Events                                                                                                            |
-| ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Minting       | `mint`, `iMint` (payable, mintFee-gated)                                                                                      |
-| Transfers     | `secureTransfer` (raw proof), `iTransferFrom` (structured `TransferValidityProof`)                                            |
-| Cloning       | `iCloneFrom` — duplicate IntelligentData to a new token                                                                       |
-| Data          | `updateEncryptedData`, `getEncryptedDataHash`, `getVerifier`, `getIntelligentDatas`                                           |
-| Authorization | `authorizeUsage`, `revokeAuthorization`, `batchAuthorizeUsage`, `isAuthorizedUser`, `authorizedUsersOf`, `authorizedTokensOf` |
-| Delegation    | `delegateAccess`, `revokeDelegateAccess`                                                                                      |
+### Register a TEE oracle
 
-### AgentNFT
+```bash
+cd contracts
+TEE_VERIFIER_ADDRESS=0x... TDX_ORACLE_ADDRESS=0x... \
+  npx hardhat ignition deploy ignition/modules/AddOracle.ts --network zeroG
+```
 
-Implements `IERC7857` and inherits `ERC721URIStorage`, `AccessControl`, `Pausable`, `ReentrancyGuard`.
+Use `ZeroGComputeClient.listServices()` to discover available providers.
 
-| Feature            | Detail                                               |
-| ------------------ | ---------------------------------------------------- |
-| Roles              | `DEFAULT_ADMIN_ROLE`, `MINTER_ROLE`, `OPERATOR_ROLE` |
-| Constructor        | `constructor(uint256 _mintFee)`                      |
-| Max authorizations | 100 users per token                                  |
-| Admin              | `setMintFee`, `pause` / `unpause`, `withdraw`        |
+### Run the dashboard
+
+```bash
+# Auto-populate contract addresses from latest deployment
+npm run setup-env --prefix contracts
+
+cd apps/dashboard
+cp .env.example .env
+npm run dev
+```
+
+---
+
+## Environment Variables
+
+| Variable                                  | Description                                 |
+| ----------------------------------------- | ------------------------------------------- |
+| `PRIVATE_KEY`                             | Deployer / server EOA private key           |
+| `NEXT_PUBLIC_AGENT_NFT_ADDRESS`           | Deployed `AgentNFT` contract                |
+| `NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS`      | Deployed `AgentRegistry` contract           |
+| `NEXT_PUBLIC_REPUTATION_REGISTRY_ADDRESS` | Deployed `ReputationRegistry` contract      |
+| `NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS` | Deployed `ValidationRegistry` contract      |
+| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS`        | Deployed `TEEVerifier` contract             |
+| `NEXT_PUBLIC_ENS_AGENT_REGISTRY_ADDRESS`  | Deployed `ENSAgentRegistry` contract        |
+| `ZERO_G_PRIVATE_KEY`                      | Key for 0G Storage uploads (server actions) |
+| `ZERO_G_COMPUTE_ORACLE_PROVIDER`          | 0G Compute provider URL for TEE oracle      |
+
+---
+
+## Open Standards
+
+- **[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004)** — Trustless Agent Registry (identity, reputation, validation)
+- **[ERC-7857](https://eips.ethereum.org/EIPS/eip-7857)** — Intelligent Digital Assets (ownable AI agents with encrypted private metadata)
+
+---
+
+## License
+
+MIT — see [LICENSE](./LICENSE).

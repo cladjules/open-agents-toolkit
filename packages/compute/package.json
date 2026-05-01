@@ -1,0 +1,35 @@
+{
+  "name": "@open-agents-toolkit/compute",
+  "version": "0.1.0",
+  "description": "0G Compute Network client — decentralized AI inference and TEE re-encryption oracle for AgentNFT transfers",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "clean": "rm -rf dist .turbo",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.13",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@0glabs/0g-serving-broker": "^0.7.8",
+    "@open-agents-toolkit/core": "*",
+    "debug": "^4.4.3",
+    "ethers": "6.13.1"
+  }
+}

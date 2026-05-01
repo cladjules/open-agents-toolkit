@@ -1,34 +1,37 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { keccak256, toHex, zeroHash, encodePacked } from 'viem';
+import { keccak256, toHex, encodePacked, zeroHash, zeroAddress } from 'viem';
 import { network } from 'hardhat';
 
 const { viem, networkHelpers } = await network.create();
 
 describe('ValidationRegistry', function () {
   async function deployFixture() {
-    const identity = await viem.deployContract('AgentRegistry');
-    const val = await viem.deployContract('ValidationRegistry');
-    await val.write.initialize([identity.address]);
     const [alice, bob, validator] = await viem.getWalletClients();
+    const identity = await viem.deployContract('AgentRegistry', [
+      'AgentRegistry',
+      'AGENT',
+      alice.account.address,
+      zeroAddress,
+    ]);
+    const val = await viem.deployContract('ValidationRegistry', [identity.address]);
 
-    // Register alice as agent #1
-    await identity.write.register(['zerog://0xAgent1Meta'], { account: alice.account });
-    const agentId = 1n;
+    // Mint alice as agent #0
+    await identity.write.mint([alice.account.address, 'zerog://0xAgent1Meta', 'zerog://0xMeta', []], { account: alice.account });
+    const agentId = 0n;
 
     return { identity, val, alice, bob, validator, agentId };
   }
 
-  it('initialize: sets identity registry', async function () {
+  it('constructor: sets identity registry', async function () {
     const { identity, val } = await networkHelpers.loadFixture(deployFixture);
     assert.equal((await val.read.getAgentRegistry()).toLowerCase(), identity.address.toLowerCase());
   });
 
-  it('initialize: reverts on second call', async function () {
-    const { identity, val } = await networkHelpers.loadFixture(deployFixture);
-    await viem.assertions.revertWithCustomError(
-      val.write.initialize([identity.address]),
-      val, 'AlreadyInitialized',
+  it('constructor: reverts with zero agent registry', async function () {
+    await assert.rejects(
+      viem.deployContract('ValidationRegistry', [zeroAddress]),
+      /Invalid agent registry/,
     );
   });
 
@@ -119,15 +122,19 @@ describe('ValidationRegistry', function () {
 
   it('validationResponse (TEE): accepts valid oracle proof via TEEVerifier', async function () {
     const [alice, , , oracle] = await viem.getWalletClients();
-    const identity = await viem.deployContract('AgentRegistry');
-    const val = await viem.deployContract('ValidationRegistry');
-    await val.write.initialize([identity.address]);
+    const identity = await viem.deployContract('AgentRegistry', [
+      'AgentRegistry',
+      'AGENT',
+      alice.account.address,
+      zeroAddress,
+    ]);
+    const val = await viem.deployContract('ValidationRegistry', [identity.address]);
     const tee = await viem.deployContract('TEEVerifier');
     const [owner] = await viem.getWalletClients();
     await tee.write.addOracle([oracle.account.address], { account: owner.account });
 
-    await identity.write.register(['zerog://0xTEEAgent'], { account: alice.account });
-    const agentId = 1n;
+    await identity.write.mint([alice.account.address, 'zerog://0xTEEAgent', 'zerog://0xMeta1', []], { account: alice.account });
+    const agentId = 0n;
     const requestHash = keccak256(toHex('tee-payload'));
     const response = 95;
 
@@ -147,14 +154,18 @@ describe('ValidationRegistry', function () {
 
   it('validationResponse (TEE): rejects invalid oracle proof', async function () {
     const [alice, bob] = await viem.getWalletClients();
-    const identity = await viem.deployContract('AgentRegistry');
-    const val = await viem.deployContract('ValidationRegistry');
-    await val.write.initialize([identity.address]);
+    const identity = await viem.deployContract('AgentRegistry', [
+      'AgentRegistry',
+      'AGENT',
+      alice.account.address,
+      zeroAddress,
+    ]);
+    const val = await viem.deployContract('ValidationRegistry', [identity.address]);
     const tee = await viem.deployContract('TEEVerifier');
     // No oracle registered.
 
-    await identity.write.register(['zerog://0xTEEAgent2'], { account: alice.account });
-    const agentId = 1n;
+    await identity.write.mint([alice.account.address, 'zerog://0xTEEAgent2', 'zerog://0xMeta2', []], { account: alice.account });
+    const agentId = 0n;
     const requestHash = keccak256(toHex('tee-bad'));
     const response = 50;
 

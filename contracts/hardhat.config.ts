@@ -2,8 +2,25 @@ import "dotenv/config";
 import hardhatToolboxViemPlugin from "@nomicfoundation/hardhat-toolbox-viem";
 
 import { configVariable, defineConfig } from "hardhat/config";
+
+const zeroGExplorerUrl =  "https://chainscan-galileo.0g.ai";
+const zeroGExplorerApiUrl = "https://chainscan-galileo.0g.ai/open/api";
+
 export default defineConfig({
   plugins: [hardhatToolboxViemPlugin],
+  chainDescriptors: {
+    16602: {
+      name: "0G Galileo Testnet",
+      chainType: "l1",
+      blockExplorers: {
+        blockscout: {
+          name: "0G ChainScan Galileo",
+          url: zeroGExplorerUrl,
+          apiUrl: zeroGExplorerApiUrl,
+        },
+      },
+    },
+  },
   paths: {
     sources: "./src",
   },

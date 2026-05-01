@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.35;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -38,7 +38,6 @@ contract ReputationRegistry is ReentrancyGuard {
     // ─── Storage ──────────────────────────────────────────────────────────────
 
     address private _agentRegistry;
-    bool private _initialized;
 
     /// @dev agentId => clientAddress => feedbackIndex (1-based) => FeedbackRecord
     mapping(uint256 => mapping(address => mapping(uint64 => FeedbackRecord))) private _feedback;
@@ -84,17 +83,15 @@ contract ReputationRegistry is ReentrancyGuard {
 
     // ─── Errors ───────────────────────────────────────────────────────────────
 
-    error AlreadyInitialized();
     error InvalidValueDecimals();
     error AgentOwnerCannotRate();
     error FeedbackNotFound();
     error EmptyClientAddresses();
 
-    // ─── Initialize ───────────────────────────────────────────────────────────
+    // ─── Constructor ──────────────────────────────────────────────────────────
 
-    function initialize(address agentRegistry_) external {
-        if (_initialized) revert AlreadyInitialized();
-        _initialized = true;
+    constructor(address agentRegistry_) {
+        require(agentRegistry_ != address(0), "Invalid agent registry");
         _agentRegistry = agentRegistry_;
     }
 

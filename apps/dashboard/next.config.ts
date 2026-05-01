@@ -1,11 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    serverActions: {
-      allowedOrigins: ["localhost:3000"],
-    },
-  },
   // Suppress warnings for packages that use Node.js built-ins in the client bundle
   webpack: (config, { isServer }) => {
     if (!isServer) {

@@ -33,6 +33,7 @@ const raw = JSON.parse(readFileSync(deployedPath, "utf8"));
 // Map Ignition module keys → env var names
 const KEY_MAP = {
   "OpenAgentsToolkit#AgentRegistry":      "AGENT_REGISTRY_ADDRESS",
+  "OpenAgentsToolkit#ENSAgentRegistry":   "ENS_AGENT_REGISTRY_ADDRESS",
   "OpenAgentsToolkit#ReputationRegistry": "REPUTATION_REGISTRY_ADDRESS",
   "OpenAgentsToolkit#ValidationRegistry": "VALIDATION_REGISTRY_ADDRESS",
   "OpenAgentsToolkit#TEEVerifier":        "NEXT_PUBLIC_TEE_VERIFIER_ADDRESS",

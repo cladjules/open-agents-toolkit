@@ -12,9 +12,14 @@
     "node": "hardhat node",
     "deploy:sepolia": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network sepolia --reset",
     "deploy:zeroG": "yes | hardhat ignition deploy ignition/modules/Deploy.ts --network zeroGGalileo --reset",
-    "addOracle:sepolia": "yes | hardhat ignition deploy ignition/modules/AddOracle.ts --network sepolia",
-    "addOracle:zeroG": "yes | hardhat ignition deploy ignition/modules/AddOracle.ts --network zeroGGalileo --parameters ignition/parameters.zeroG.json --reset",
+    "addOracle:sepolia": "yes | hardhat ignition deploy ignition/modules/AddOracle.ts --network sepolia --reset",
+    "addOracle:zeroG": "yes | hardhat ignition deploy ignition/modules/AddOracle.ts --network zeroGGalileo --reset --parameters ignition/parameters.zeroG.json",
+    "setKeeper:sepolia": "yes | hardhat ignition deploy ignition/modules/SetKeeper.ts --network sepolia --reset",
+    "setKeeper:zeroG": "yes | hardhat ignition deploy ignition/modules/SetKeeper.ts --network zeroGGalileo --reset --parameters ignition/parameters.zeroG.json",
     "e2e:zeroG": "node --import tsx/esm scripts/e2e.ts",
+    "verify:zeroG": "node scripts/verify-ignition.mjs 16602 zeroGGalileo",
+    "verify:sepolia": "node scripts/verify-ignition.mjs 11155111 sepolia",
+    "zeroG": "npm run build && npm run deploy:zeroG && npm run addOracle:zeroG && npm run setKeeper:zeroG && npm run setup-env:zeroG && npm run verify:zeroG",
     "setup-env": "node scripts/setup-env.mjs",
     "setup-env:zeroG": "node scripts/setup-env.mjs 16602",
     "setup-env:sepolia": "node scripts/setup-env.mjs 11155111"
@@ -22,14 +27,14 @@
   "devDependencies": {
     "@open-agents-toolkit/agent-nft": "file:../packages/agent-nft",
     "@open-agents-toolkit/compute": "file:../packages/compute",
-    "@nomicfoundation/hardhat-ignition": "^3.1.3",
+    "@nomicfoundation/hardhat-ignition": "^3.1.4",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.4",
     "@openzeppelin/contracts": "^5.6.1",
     "@types/node": "^25.6.0",
     "dotenv": "^17.4.2",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
-    "hardhat": "^3.4.1",
+    "hardhat": "^3.4.3",
     "typescript": "^6.0.3",
-    "viem": "^2.48.4"
+    "viem": "^2.48.7"
   }
 }

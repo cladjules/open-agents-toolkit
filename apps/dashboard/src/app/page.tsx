@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import AgentList from "@/components/registry/AgentList";
 
+export const dynamic = "force-dynamic";
+
 export default function HomePage() {
   return (
     <div className="space-y-10">

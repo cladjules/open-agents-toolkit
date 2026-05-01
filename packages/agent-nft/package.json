@@ -1,0 +1,42 @@
+{
+  "name": "@open-agents-toolkit/agent-nft",
+  "version": "0.1.0",
+  "description": "ERC-7857 AI Agent NFTs with private encrypted metadata",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./browser": {
+      "import": "./dist/browser.js",
+      "types": "./dist/browser.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "clean": "rm -rf dist .turbo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src --ext .ts"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.13",
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-ts-sdk": "^1.2.8",
+    "@open-agents-toolkit/core": "*",
+    "debug": "^4.4.3",
+    "eciesjs": "^0.4.16",
+    "ethers": "6.13.1",
+    "viem": "^2.48.7"
+  }
+}

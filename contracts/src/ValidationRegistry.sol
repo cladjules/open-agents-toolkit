@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.35;
 
+import "./interfaces/IAgentDataVerifier.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 interface IAgentRegistryForValidation {
@@ -9,21 +10,6 @@ interface IAgentRegistryForValidation {
     function isApprovedForAll(address owner, address operator) external view returns (bool);
 
     function getApproved(uint256 tokenId) external view returns (address);
-}
-
-/**
- * @dev Optional interface that a contract validator (e.g. TEEVerifier) may implement
- *      to verify validation responses via oracle attestation.
- *      When validatorAddress is a contract, ValidationRegistry will call this instead
- *      of checking msg.sender.
- */
-interface IValidationOracle {
-    function verifyValidation(
-        uint256 agentId,
-        bytes32 requestHash,
-        uint8 response,
-        bytes calldata proof
-    ) external view returns (bool);
 }
 
 /**
@@ -50,7 +36,6 @@ contract ValidationRegistry is ReentrancyGuard {
     // ─── Storage ──────────────────────────────────────────────────────────────
 
     address private _agentRegistry;
-    bool private _initialized;
 
     /// @dev requestHash => ValidationRecord
     mapping(bytes32 => ValidationRecord) private _validations;
@@ -85,18 +70,16 @@ contract ValidationRegistry is ReentrancyGuard {
 
     // ─── Errors ───────────────────────────────────────────────────────────────
 
-    error AlreadyInitialized();
     error NotOwnerOrOperator();
     error RequestNotFound();
     error NotRequestedValidator();
     error InvalidResponse();
     error OracleVerificationFailed(bytes32 requestHash);
 
-    // ─── Initialize ───────────────────────────────────────────────────────────
+    // ─── Constructor ──────────────────────────────────────────────────────────
 
-    function initialize(address agentRegistry_) external {
-        if (_initialized) revert AlreadyInitialized();
-        _initialized = true;
+    constructor(address agentRegistry_) {
+        require(agentRegistry_ != address(0), "Invalid agent registry");
         _agentRegistry = agentRegistry_;
     }
 
@@ -148,7 +131,7 @@ contract ValidationRegistry is ReentrancyGuard {
      * @notice Submit a validation response for a pending request.
      * @dev For EOA validators: msg.sender must equal the validatorAddress from the request.
      *      For contract validators (e.g. TEEVerifier): proof must be a valid oracle attestation
-     *      verified via IValidationOracle.verifyValidation().
+     *      verified via IAgentDataVerifier.verifyValidation().
      *      May be called multiple times (progressive finality).
      * @param requestHash  Identifies the request.
      * @param response     Score 0-100 (0 = fail, 100 = pass, or intermediate).
@@ -172,8 +155,8 @@ contract ValidationRegistry is ReentrancyGuard {
         address validatorAddress = record.validatorAddress;
 
         if (validatorAddress.code.length > 0) {
-            // Contract validator: verify via IValidationOracle (e.g. TEEVerifier).
-            bool valid = IValidationOracle(validatorAddress).verifyValidation(
+            // Contract validator: verify via IAgentDataVerifier (e.g. TEEVerifier).
+            bool valid = IAgentDataVerifier(validatorAddress).verifyValidation(
                 record.agentId,
                 requestHash,
                 response,

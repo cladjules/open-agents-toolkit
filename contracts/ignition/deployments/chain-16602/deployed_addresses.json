@@ -1,6 +1,7 @@
 {
-  "OpenAgentsToolkit#AgentRegistry": "0xDe530ca027d0C4021fa08F162Fa9FDa27Ca9C4Ad",
-  "OpenAgentsToolkit#ReputationRegistry": "0xC5710acff0B5C74E1a513d94f4c4DAFa7B672dA1",
-  "OpenAgentsToolkit#TEEVerifier": "0xA62Ea97A61FF1E479C3c835E6ca1A4a4b9A9034A",
-  "OpenAgentsToolkit#ValidationRegistry": "0x0d7e72d9d11801164b6191814b6C3752aCEa2572"
+  "OpenAgentsToolkit#TEEVerifier": "0x26723930EddE6f0ae2021Df7E80142154F4E2a3D",
+  "OpenAgentsToolkit#AgentRegistry": "0x7144278659f89131be0A596bCeA7DC53B86e83A6",
+  "OpenAgentsToolkit#ENSAgentRegistry": "0xF834acE1C57AeBDd544Cdc3C0105C9c31a574961",
+  "OpenAgentsToolkit#ReputationRegistry": "0xea736dAaeCEb50ed8A766610f5D8Bca2B88EDBDd",
+  "OpenAgentsToolkit#ValidationRegistry": "0xA3a66E600826712a50797063aAd7bB3588b73625"
 }

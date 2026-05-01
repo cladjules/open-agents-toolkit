@@ -28,14 +28,19 @@ export default function AgentCard({ agent }: AgentCardProps) {
       <p className="text-sm text-gray-400 line-clamp-2">{agent.metadata.description}</p>
 
       <div className="flex flex-wrap gap-1.5">
-        {agent.metadata.capabilities?.map((cap) => (
+        {(agent.metadata.services ?? []).slice(0, 3).map((service) => (
           <span
-            key={cap}
+            key={`${service.name}:${service.endpoint}`}
             className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-400 border border-gray-700"
           >
-            {cap}
+            {service.name}
           </span>
         ))}
+        {(agent.metadata.services?.length ?? 0) === 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-500 border border-gray-700">
+            No services
+          </span>
+        )}
       </div>
 
       <div className="pt-2 border-t border-gray-800 flex items-center justify-between text-xs text-gray-500">

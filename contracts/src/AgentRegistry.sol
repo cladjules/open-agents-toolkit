@@ -1,483 +1,346 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.35;
 
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/utils/Strings.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/interfaces/IERC1271.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "./interfaces/IERC7857.sol";
+import "./interfaces/IAgentDataVerifier.sol";
+import "./interfaces/IAgentRegistry.sol";
 
 /**
  * @title AgentRegistry
- * @notice Unified ERC-8004 Agent Identity Registry + ERC-7857 Intelligent Digital Asset.
+ * @notice ERC-721 Agent NFT with optional encrypted private metadata (ERC-7857 style) and ERC-8004 metadata.
  *
- * Each registered agent is a single ERC-721 token that carries:
- *   - ERC-8004: public profile URI, on-chain key/value metadata, and a dedicated
- *     agent wallet (EIP-712 / ERC-1271 proof of control, auto-cleared on transfer).
- *   - ERC-7857: optional encrypted private metadata anchored on-chain, usage
- *     authorisation, access delegation, cloning, and re-encryption on secure transfer.
- *
- * Agents registered without private data (via register()) behave as plain ERC-721
- * tokens — standard transferFrom works normally.  Agents minted with an
- * IAgentDataVerifier (via mint()) require secureTransfer() for ownership changes;
- * plain transferFrom is blocked when a verifier is set.
+ * Features:
+ *   - Single mint function that handles both plain ERC-721 and encrypted-data tokens.
+ *   - secureTransfer() validates a TEE re-encryption proof before transferring.
+ *   - Role-based access: DEFAULT_ADMIN_ROLE only.
+ *   - Holders of DEFAULT_ADMIN_ROLE can mint without paying the mint fee.
+ *   - URI priority: custom per-token → baseURI+id → first dataDescription.
  */
-contract AgentRegistry is IERC7857, ERC721URIStorage, EIP712, ReentrancyGuard {
-    // ─── ERC-8004 Types ───────────────────────────────────────────────────────
+contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausable, ERC721, EIP712 {
+    // ─── Roles ────────────────────────────────────────────────────────────────
+    // Only DEFAULT_ADMIN_ROLE (from AccessControl) is used.
 
-    struct MetadataEntry {
-        string metadataKey;
-        bytes metadataValue;
-    }
-
-    // ─── ERC-7857 Types ───────────────────────────────────────────────────────
-
-    struct AgentData {
-        bytes32 encryptedDataHash;
-        address verifier;
-        uint256 mintedAt;
-    }
-
-    // ─── Constants ────────────────────────────────────────────────────────────
+    // ─── ERC-8004 ─────────────────────────────────────────────────────────────
 
     bytes32 private constant SET_AGENT_WALLET_TYPEHASH =
         keccak256("SetAgentWallet(uint256 agentId,address newWallet,uint256 deadline)");
 
-    string private constant AGENT_WALLET_KEY = "agentWallet";
-
-    bytes4 private constant ERC1271_MAGIC_VALUE = 0x1626ba7e;
-
-    uint256 private constant MAX_AUTHORIZATIONS = 100;
-
     // ─── Storage ──────────────────────────────────────────────────────────────
 
+    address public admin;
+    uint256 public mintFee;
+    string public baseURI;
+
+    mapping(uint256 => address) public creators;
+
     uint256 private _nextTokenId;
+    IAgentDataVerifier private _verifier;
 
-    // ERC-8004
-    mapping(uint256 => mapping(string => bytes)) private _metadata;
-    mapping(uint256 => address) private _agentWallets;
+    mapping(uint256 => string) private _customURIs;
+    mapping(uint256 => IntelligentData[]) private _intelligentDataOf;
+    mapping(uint256 => address) private _tokenVerifier;
 
-    // ERC-7857 private data
-    mapping(uint256 => AgentData) private _agentData;
-    mapping(uint256 => IntelligentData[]) private _intelligentData;
-    mapping(uint256 => address) public tokenCreator;
-    mapping(uint256 => uint256) public cloneSource;
+    // Authorized relayers (e.g., ENSAgentRegistry for custodial transfers)
+    mapping(address => bool) public isRelayer;
 
-    // ERC-7857 authorization
-    mapping(uint256 => address[]) private _authorizedUsers;
-    mapping(uint256 => mapping(address => bool)) private _isAuthorizedUser;
-    mapping(address => uint256[]) private _authorizedTokens;
-    mapping(address => mapping(uint256 => bool)) private _isAuthorizedToken;
-
-    // ERC-7857 delegation
-    mapping(address => address) public delegatedAssistant;
-
-    // Guard: set true inside secureTransfer/iTransferFrom to allow _update past the verifier check
-    bool private _inSecureTransfer;
-
-    // ─── ERC-8004 Events ──────────────────────────────────────────────────────
-
-    event Registered(uint256 indexed agentId, string agentURI, address indexed owner);
-    event URIUpdated(uint256 indexed agentId, string newURI, address indexed updatedBy);
-    event MetadataSet(
-        uint256 indexed agentId,
-        string indexed indexedMetadataKey,
-        string metadataKey,
-        bytes metadataValue
-    );
-
-    // ─── Errors ───────────────────────────────────────────────────────────────
-
-    // ERC-8004
-    error NotTokenOwnerOrOperator(uint256 agentId, address caller);
-    error EmptyURI();
-    error ReservedKey();
-    error SignatureExpired();
-    error InvalidSignature();
-
-    // ERC-7857
-    error NotTokenOwner(uint256 tokenId, address caller);
-    error InvalidVerifier();
-    error VerificationFailed(uint256 tokenId);
-    error EmptyHash();
-    error AlreadyAuthorized();
-    error NotAuthorized();
-    error MaxAuthorizationsReached();
-    error SecureTransferRequired(uint256 tokenId);
+    // ERC-8004: metadata URI and agent wallet
+    mapping(uint256 => string) private _metadataUri;
+    mapping(uint256 => address) private _agentWallet;
 
     // ─── Constructor ──────────────────────────────────────────────────────────
 
-    constructor() ERC721("AgentIdentity", "AGID") EIP712("AgentRegistry", "1") {}
+    constructor(
+        string memory name_,
+        string memory symbol_,
+        address admin_,
+        address verifierAddr
+    ) ERC721(name_, symbol_) EIP712("AgentRegistry", "1") {
+        require(admin_ != address(0), "Invalid admin address");
 
-    // ─── ERC-8004 Registration ────────────────────────────────────────────────
+        admin = admin_;
+        if (verifierAddr != address(0)) {
+            _verifier = IAgentDataVerifier(verifierAddr);
+        }
 
-    /// @notice Register a new agent; agentURI is set later via setAgentURI().
-    function register() external nonReentrant returns (uint256 agentId) {
-        return _doRegister(msg.sender, "", new MetadataEntry[](0), bytes32(0), address(0));
+        _grantRole(DEFAULT_ADMIN_ROLE, admin_);
     }
 
-    /// @notice Register a new agent with an agentURI.
-    function register(string calldata agentURI) external nonReentrant returns (uint256 agentId) {
-        return _doRegister(msg.sender, agentURI, new MetadataEntry[](0), bytes32(0), address(0));
+    // ─── Admin ────────────────────────────────────────────────────────────────
+
+    function setAdmin(address newAdmin) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newAdmin != address(0), "Invalid admin address");
+        address oldAdmin = admin;
+        if (oldAdmin == newAdmin) return;
+        admin = newAdmin;
+        _grantRole(DEFAULT_ADMIN_ROLE, newAdmin);
+        _revokeRole(DEFAULT_ADMIN_ROLE, oldAdmin);
+        emit AdminChanged(oldAdmin, newAdmin);
     }
 
-    /// @notice Register a new agent with an agentURI and extra on-chain metadata.
-    function register(
-        string calldata agentURI,
-        MetadataEntry[] calldata metadata
-    ) external nonReentrant returns (uint256 agentId) {
-        return _doRegister(msg.sender, agentURI, metadata, bytes32(0), address(0));
+    // ─── Verifier ─────────────────────────────────────────────────────────────
+
+    function verifier() external view override returns (IAgentDataVerifier) {
+        return _verifier;
     }
 
-    // ─── ERC-7857 Minting ─────────────────────────────────────────────────────
+    function setVerifier(address newVerifier) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newVerifier != address(0), "Zero address");
+        address oldVerifier = address(_verifier);
+        _verifier = IAgentDataVerifier(newVerifier);
+        emit VerifierUpdated(oldVerifier, newVerifier);
+    }
 
-    /// @inheritdoc IERC7857
+    function setRelayer(address relayer, bool authorized) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        isRelayer[relayer] = authorized;
+    }
+
+    // ─── Mint ─────────────────────────────────────────────────────────────────
+
+    /**
+     * @inheritdoc IAgentRegistry
+     * @dev Callers with DEFAULT_ADMIN_ROLE pay no fee.
+     *      publicMetadataUri is the ERC-721 tokenURI (with image, description, traits).
+     *      metadataUri is the ERC-8004 metadata registry file URI (uploaded to 0G).
+     *      All agents use the global verifier set on this contract.
+     */
     function mint(
         address to,
         string calldata publicMetadataUri,
-        bytes32 encryptedDataHash,
-        address verifier
-    ) external nonReentrant returns (uint256 tokenId) {
-        if (bytes(publicMetadataUri).length == 0) revert EmptyURI();
-        if (encryptedDataHash == bytes32(0)) revert EmptyHash();
-        if (verifier == address(0)) revert InvalidVerifier();
-        return _doRegister(to, publicMetadataUri, new MetadataEntry[](0), encryptedDataHash, verifier);
-    }
+        string calldata metadataUri,
+        IntelligentData[] calldata newDatas
+    ) external payable override nonReentrant whenNotPaused returns (uint256 tokenId) {
+        require(to != address(0), "Zero address recipient");
 
-    /// @inheritdoc IERC7857
-    function iMint(
-        address to,
-        IntelligentData[] calldata datas
-    ) external payable nonReentrant returns (uint256 tokenId) {
-        tokenId = ++_nextTokenId;
-        _safeMint(to, tokenId);
-        _initAgentWallet(tokenId, to);
-        _setIntelligentData(tokenId, datas);
-        tokenCreator[tokenId] = msg.sender;
-    }
-
-    function _doRegister(
-        address to,
-        string memory agentURI,
-        MetadataEntry[] memory metadata,
-        bytes32 encryptedDataHash,
-        address verifier
-    ) internal returns (uint256 agentId) {
-        agentId = ++_nextTokenId;
-        _safeMint(to, agentId);
-
-        if (bytes(agentURI).length > 0) {
-            _setTokenURI(agentId, agentURI);
+        bool privileged = hasRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        if (!privileged) {
+            require(msg.value >= mintFee, "Insufficient mint fee");
         }
 
-        _initAgentWallet(agentId, to);
+        tokenId = _nextTokenId;
+        _safeMint(to, _nextTokenId);
 
-        for (uint256 i; i < metadata.length; ++i) {
-            if (_isReservedKey(metadata[i].metadataKey)) revert ReservedKey();
-            _metadata[agentId][metadata[i].metadataKey] = metadata[i].metadataValue;
-            emit MetadataSet(agentId, metadata[i].metadataKey, metadata[i].metadataKey, metadata[i].metadataValue);
+        if (bytes(publicMetadataUri).length > 0) {
+            _customURIs[tokenId] = publicMetadataUri;
         }
 
-        if (encryptedDataHash != bytes32(0)) {
-            _agentData[agentId] = AgentData({
-                encryptedDataHash: encryptedDataHash,
-                verifier: verifier,
-                mintedAt: block.timestamp
-            });
-            tokenCreator[agentId] = msg.sender;
-            emit AgentMinted(agentId, to, encryptedDataHash);
+        if (bytes(metadataUri).length > 0) {
+            _metadataUri[tokenId] = metadataUri;
         }
 
-        emit Registered(agentId, agentURI, to);
-    }
+        creators[tokenId] = msg.sender;
 
-    function _initAgentWallet(uint256 agentId, address owner) internal {
-        _agentWallets[agentId] = owner;
-        bytes memory walletBytes = abi.encodePacked(owner);
-        _metadata[agentId][AGENT_WALLET_KEY] = walletBytes;
-        emit MetadataSet(agentId, AGENT_WALLET_KEY, AGENT_WALLET_KEY, walletBytes);
-    }
-
-    // ─── ERC-8004 URI & Metadata ──────────────────────────────────────────────
-
-    function setAgentURI(uint256 agentId, string calldata newURI) external {
-        if (!_isOwnerOrOperator(agentId, msg.sender)) revert NotTokenOwnerOrOperator(agentId, msg.sender);
-        if (bytes(newURI).length == 0) revert EmptyURI();
-        _setTokenURI(agentId, newURI);
-        emit URIUpdated(agentId, newURI, msg.sender);
-    }
-
-    function getMetadata(uint256 agentId, string memory metadataKey) external view returns (bytes memory) {
-        return _metadata[agentId][metadataKey];
-    }
-
-    function setMetadata(uint256 agentId, string memory metadataKey, bytes memory metadataValue) external {
-        if (!_isOwnerOrOperator(agentId, msg.sender)) revert NotTokenOwnerOrOperator(agentId, msg.sender);
-        if (_isReservedKey(metadataKey)) revert ReservedKey();
-        _metadata[agentId][metadataKey] = metadataValue;
-        emit MetadataSet(agentId, metadataKey, metadataKey, metadataValue);
-    }
-
-    // ─── ERC-8004 Agent Wallet ────────────────────────────────────────────────
-
-    /**
-     * @notice Set a dedicated agent wallet, proved by an EIP-712 signature from newWallet.
-     */
-    function setAgentWallet(uint256 agentId, address newWallet, uint256 deadline, bytes calldata signature) external {
-        if (!_isOwnerOrOperator(agentId, msg.sender)) revert NotTokenOwnerOrOperator(agentId, msg.sender);
-        if (block.timestamp > deadline) revert SignatureExpired();
-
-        bytes32 structHash = keccak256(abi.encode(SET_AGENT_WALLET_TYPEHASH, agentId, newWallet, deadline));
-        bytes32 digest = _hashTypedDataV4(structHash);
-
-        bool valid;
-        if (newWallet.code.length > 0) {
-            try IERC1271(newWallet).isValidSignature(digest, signature) returns (bytes4 magic) {
-                valid = (magic == ERC1271_MAGIC_VALUE);
-            } catch {
-                valid = false;
-            }
-        } else {
-            valid = (ECDSA.recover(digest, signature) == newWallet);
+        // Set intelligent data if provided
+        if (newDatas.length > 0) {
+            _setIntelligentData(tokenId, newDatas);
         }
-        if (!valid) revert InvalidSignature();
 
-        _agentWallets[agentId] = newWallet;
-        bytes memory walletBytes = abi.encodePacked(newWallet);
-        _metadata[agentId][AGENT_WALLET_KEY] = walletBytes;
-        emit MetadataSet(agentId, AGENT_WALLET_KEY, AGENT_WALLET_KEY, walletBytes);
+        // ERC-8004: set initial agent wallet to recipient and emit Registered
+        _agentWallet[tokenId] = to;
+        emit AgentWalletSet(tokenId, to);
+        emit Registered(tokenId, publicMetadataUri, to);
+
+        // Refund any excess payment
+        if (!privileged && msg.value > mintFee) {
+            (bool ok, ) = payable(msg.sender).call{ value: msg.value - mintFee }("");
+            require(ok, "Refund failed");
+        }
+
+        _nextTokenId++;
+
+        return tokenId;
     }
 
-    function getAgentWallet(uint256 agentId) external view returns (address) {
-        return _agentWallets[agentId];
-    }
+    // ─── Secure Transfer ──────────────────────────────────────────────────────
 
-    function unsetAgentWallet(uint256 agentId) external {
-        if (!_isOwnerOrOperator(agentId, msg.sender)) revert NotTokenOwnerOrOperator(agentId, msg.sender);
-        delete _agentWallets[agentId];
-        delete _metadata[agentId][AGENT_WALLET_KEY];
-        emit MetadataSet(agentId, AGENT_WALLET_KEY, AGENT_WALLET_KEY, "");
-    }
-
-    // ─── ERC-7857 Transfers ───────────────────────────────────────────────────
-
-    /// @inheritdoc IERC7857
+    /// @inheritdoc IAgentRegistry
     function secureTransfer(
         uint256 tokenId,
         address to,
-        bytes32 newDataHash,
-        bytes calldata sealedKey,
+        bytes32[] calldata newDataHashes,
+        bytes calldata /* sealedKey */,
         bytes calldata proof
-    ) external nonReentrant {
-        address currentOwner = ownerOf(tokenId);
-        if (currentOwner != msg.sender) revert NotTokenOwner(tokenId, msg.sender);
-        if (newDataHash == bytes32(0)) revert EmptyHash();
+    ) external override nonReentrant {
+        require(to != address(0), "Zero address recipient");
 
-        AgentData storage data = _agentData[tokenId];
-        if (data.verifier != address(0)) {
-            bool valid = IAgentDataVerifier(data.verifier).verifyReEncryption(
-                tokenId,
-                currentOwner,
-                to,
-                data.encryptedDataHash,
-                newDataHash,
-                proof
-            );
-            if (!valid) revert VerificationFailed(tokenId);
-        }
+        address from = ownerOf(tokenId);
+        IntelligentData[] storage datas = _intelligentDataOf[tokenId];
+        require(newDataHashes.length == datas.length, "Invalid data hash count");
 
-        data.encryptedDataHash = newDataHash;
+        // If there is encrypted data, TEE proof verification is mandatory.
+        if (datas.length > 0) {
+            // Only owner or authorized relayer (e.g. ENSAgentRegistry) can transfer with proof
+            require(msg.sender == from || isRelayer[msg.sender], "Not authorized");
 
-        _inSecureTransfer = true;
-        _transfer(currentOwner, to, tokenId);
-        _inSecureTransfer = false;
-        _clearAuthorizations(tokenId);
+            address tv = address(_verifier);
+            require(tv != address(0), "No verifier configured");
 
-        emit SealedKeyPublished(tokenId, to, sealedKey);
-        emit AgentTransferred(tokenId, currentOwner, to);
-    }
-
-    /// @inheritdoc IERC7857
-    function iTransferFrom(
-        address from,
-        address to,
-        uint256 tokenId,
-        TransferValidityProof[] calldata /* proofs */
-    ) external {
-        require(ownerOf(tokenId) == from, "Not the owner");
-        require(
-            msg.sender == from || isApprovedForAll(from, msg.sender) || getApproved(tokenId) == msg.sender,
-            "Not authorized to transfer"
-        );
-        _inSecureTransfer = true;
-        _transfer(from, to, tokenId);
-        _inSecureTransfer = false;
-        _clearAuthorizations(tokenId);
-        emit IntelligentTransfer(from, to, tokenId);
-    }
-
-    // ─── ERC-7857 Cloning ─────────────────────────────────────────────────────
-
-    /// @inheritdoc IERC7857
-    function iCloneFrom(
-        address from,
-        address to,
-        uint256 tokenId,
-        TransferValidityProof[] calldata /* proofs */
-    ) external returns (uint256 newTokenId) {
-        require(ownerOf(tokenId) == from, "Not the owner");
-        require(
-            msg.sender == from || isApprovedForAll(from, msg.sender) || getApproved(tokenId) == msg.sender,
-            "Not authorized to clone"
-        );
-
-        newTokenId = ++_nextTokenId;
-        _safeMint(to, newTokenId);
-        _initAgentWallet(newTokenId, to);
-
-        IntelligentData[] storage src = _intelligentData[tokenId];
-        for (uint256 i = 0; i < src.length; i++) {
-            _intelligentData[newTokenId].push(src[i]);
-        }
-        cloneSource[newTokenId] = tokenId;
-        tokenCreator[newTokenId] = tokenCreator[tokenId];
-
-        emit IntelligentClone(from, to, tokenId, newTokenId);
-    }
-
-    // ─── ERC-7857 Data Management ─────────────────────────────────────────────
-
-    /// @inheritdoc IERC7857
-    function updateEncryptedData(uint256 tokenId, bytes32 newHash) external {
-        if (ownerOf(tokenId) != msg.sender) revert NotTokenOwner(tokenId, msg.sender);
-        if (newHash == bytes32(0)) revert EmptyHash();
-        _agentData[tokenId].encryptedDataHash = newHash;
-        emit EncryptedDataUpdated(tokenId, newHash);
-    }
-
-    /// @inheritdoc IERC7857
-    function getEncryptedDataHash(uint256 tokenId) external view returns (bytes32) {
-        return _agentData[tokenId].encryptedDataHash;
-    }
-
-    /// @inheritdoc IERC7857
-    function getVerifier(uint256 tokenId) external view returns (address) {
-        return _agentData[tokenId].verifier;
-    }
-
-    /// @inheritdoc IERC7857
-    function getIntelligentDatas(uint256 tokenId) external view returns (IntelligentData[] memory) {
-        require(_ownerOf(tokenId) != address(0), "Token does not exist");
-        return _intelligentData[tokenId];
-    }
-
-    // ─── ERC-7857 Authorization ───────────────────────────────────────────────
-
-    /// @inheritdoc IERC7857
-    function authorizeUsage(uint256 tokenId, address user) external {
-        require(ownerOf(tokenId) == msg.sender, "Not the owner");
-        if (_isAuthorizedUser[tokenId][user]) revert AlreadyAuthorized();
-        if (_authorizedUsers[tokenId].length >= MAX_AUTHORIZATIONS) revert MaxAuthorizationsReached();
-
-        _authorizedUsers[tokenId].push(user);
-        _isAuthorizedUser[tokenId][user] = true;
-        _authorizedTokens[user].push(tokenId);
-        _isAuthorizedToken[user][tokenId] = true;
-
-        emit UsageAuthorized(tokenId, user);
-    }
-
-    /// @inheritdoc IERC7857
-    function revokeAuthorization(uint256 tokenId, address user) external {
-        require(ownerOf(tokenId) == msg.sender, "Not the owner");
-        if (!_isAuthorizedUser[tokenId][user]) revert NotAuthorized();
-
-        _isAuthorizedUser[tokenId][user] = false;
-        address[] storage users = _authorizedUsers[tokenId];
-        for (uint256 i = 0; i < users.length; i++) {
-            if (users[i] == user) {
-                users[i] = users[users.length - 1];
-                users.pop();
-                break;
+            bytes32[] memory oldDataHashes = new bytes32[](datas.length);
+            for (uint256 i = 0; i < datas.length; i++) {
+                oldDataHashes[i] = datas[i].dataHash;
             }
-        }
-        _isAuthorizedToken[user][tokenId] = false;
-        uint256[] storage tokens = _authorizedTokens[user];
-        for (uint256 i = 0; i < tokens.length; i++) {
-            if (tokens[i] == tokenId) {
-                tokens[i] = tokens[tokens.length - 1];
-                tokens.pop();
-                break;
+
+            TransferValidityProof[] memory proofs = abi.decode(proof, (TransferValidityProof[]));
+            TransferValidityProofOutput[] memory outputs = IAgentDataVerifier(tv).verifyTransferValidity(proofs);
+            require(outputs.length == datas.length, "Proof count mismatch");
+
+            bytes[] memory sealedKeys = new bytes[](outputs.length);
+            for (uint256 i = 0; i < outputs.length; i++) {
+                require(outputs[i].oldDataHash == datas[i].dataHash, "Old data hash mismatch");
+                require(outputs[i].newDataHash == newDataHashes[i], "New data hash mismatch");
+                require(
+                    outputs[i].accessAssistant == to || outputs[i].accessAssistant == from,
+                    "Access assistant mismatch"
+                );
+                sealedKeys[i] = outputs[i].sealedKey;
             }
-        }
-        emit UsageRevoked(tokenId, user);
-    }
 
-    /// @inheritdoc IERC7857
-    function batchAuthorizeUsage(uint256[] calldata tokenIds, address user) external {
-        for (uint256 i = 0; i < tokenIds.length; i++) {
-            require(ownerOf(tokenIds[i]) == msg.sender, "Not the owner");
-            if (!_isAuthorizedUser[tokenIds[i]][user]) {
-                if (_authorizedUsers[tokenIds[i]].length >= MAX_AUTHORIZATIONS) revert MaxAuthorizationsReached();
-                _authorizedUsers[tokenIds[i]].push(user);
-                _isAuthorizedUser[tokenIds[i]][user] = true;
-                emit UsageAuthorized(tokenIds[i], user);
+            for (uint256 i = 0; i < datas.length; i++) {
+                if (newDataHashes[i] != bytes32(0)) {
+                    datas[i].dataHash = newDataHashes[i];
+                }
             }
+
+            _transfer(from, to, tokenId);
+
+            if (sealedKeys.length > 0) {
+                emit PublishedSealedKey(to, tokenId, sealedKeys);
+            }
+        } else {
+            // Plain ERC-721 without encrypted data — only owner can transfer.
+            require(msg.sender == from, "Not owner");
+            _transfer(from, to, tokenId);
         }
     }
 
-    /// @inheritdoc IERC7857
-    function isAuthorizedUser(uint256 tokenId, address user) external view returns (bool) {
-        return _isAuthorizedUser[tokenId][user];
+    // ─── Data Accessors ───────────────────────────────────────────────────────
+
+    function intelligentDataOf(uint256 tokenId) external view override returns (IntelligentData[] memory) {
+        _requireOwned(tokenId);
+        return _intelligentDataOf[tokenId];
     }
 
-    /// @inheritdoc IERC7857
-    function authorizedUsersOf(uint256 tokenId) external view returns (address[] memory) {
-        return _authorizedUsers[tokenId];
+    function tokenVerifier(uint256 tokenId) external view override returns (address) {
+        return _tokenVerifier[tokenId];
     }
 
-    /// @inheritdoc IERC7857
-    function authorizedTokensOf(address user) external view returns (uint256[] memory) {
-        return _authorizedTokens[user];
+    function updateIntelligentData(uint256 tokenId, IntelligentData[] calldata newDatas) external whenNotPaused {
+        require(ownerOf(tokenId) == msg.sender, "Not owner");
+        require(newDatas.length > 0, "Empty data array");
+        _setIntelligentData(tokenId, newDatas);
     }
 
-    // ─── ERC-7857 Delegation ──────────────────────────────────────────────────
-
-    /// @inheritdoc IERC7857
-    function delegateAccess(address assistant) external {
-        delegatedAssistant[msg.sender] = assistant;
-        emit DelegateAccessSet(msg.sender, assistant);
+    /// @dev Internal helper to set intelligent data without ownership checks.
+    function _setIntelligentData(uint256 tokenId, IntelligentData[] calldata newDatas) internal {
+        delete _intelligentDataOf[tokenId];
+        for (uint256 i = 0; i < newDatas.length; i++) {
+            _intelligentDataOf[tokenId].push(newDatas[i]);
+        }
+        emit IntelligentDataSet(tokenId, _intelligentDataOf[tokenId]);
     }
 
-    /// @inheritdoc IERC7857
-    function revokeDelegateAccess() external {
-        delete delegatedAssistant[msg.sender];
-        emit DelegateAccessSet(msg.sender, address(0));
+    function getMetadataUri(uint256 tokenId) external view override returns (string memory) {
+        _requireOwned(tokenId);
+        return _metadataUri[tokenId];
     }
 
-    // ─── ERC-721 Transfer Hook ────────────────────────────────────────────────
+    // ─── URI ──────────────────────────────────────────────────────────────────
 
-    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
-        // Block plain transferFrom for tokens that have a verifier set.
-        // Mints (_ownerOf == address(0)) and burns (to == address(0)) are always allowed.
-        if (
-            _ownerOf(tokenId) != address(0) &&
-            to != address(0) &&
-            _agentData[tokenId].verifier != address(0) &&
-            !_inSecureTransfer
-        ) revert SecureTransferRequired(tokenId);
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        _requireOwned(tokenId);
 
-        address from = super._update(to, tokenId, auth);
+        string memory custom = _customURIs[tokenId];
+        if (bytes(custom).length > 0) return custom;
 
-        // ERC-8004: clear agentWallet on transfer (not on mint or burn)
-        if (from != address(0) && to != address(0)) {
-            delete _agentWallets[tokenId];
-            delete _metadata[tokenId][AGENT_WALLET_KEY];
-            emit MetadataSet(tokenId, AGENT_WALLET_KEY, AGENT_WALLET_KEY, "");
+        if (bytes(baseURI).length > 0) {
+            return string(abi.encodePacked(baseURI, Strings.toString(tokenId)));
         }
 
-        return from;
+        IntelligentData[] storage datas = _intelligentDataOf[tokenId];
+        if (datas.length > 0 && bytes(datas[0].dataDescription).length > 0) {
+            return datas[0].dataDescription;
+        }
+
+        return "";
+    }
+
+    function setBaseURI(string calldata newBaseURI) external override onlyRole(DEFAULT_ADMIN_ROLE) {
+        string memory old = baseURI;
+        baseURI = newBaseURI;
+        emit BaseURIUpdated(old, newBaseURI);
+    }
+
+    function setTokenURI(uint256 tokenId, string calldata newURI) external override {
+        require(ownerOf(tokenId) == msg.sender, "Not owner");
+        _customURIs[tokenId] = newURI;
+        emit TokenURIUpdated(tokenId, newURI);
+    }
+
+    // ─── Creator ──────────────────────────────────────────────────────────────
+
+    function creatorOf(uint256 tokenId) external view returns (address) {
+        return creators[tokenId];
+    }
+
+    function setCreator(uint256 tokenId, address creator) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _requireOwned(tokenId);
+        creators[tokenId] = creator;
+        emit CreatorSet(tokenId, creator);
+    }
+
+    // ─── Fee Management ───────────────────────────────────────────────────────
+
+    function getMintFee() external view override returns (uint256) {
+        return mintFee;
+    }
+
+    function setMintFee(uint256 newMintFee) external override onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 old = mintFee;
+        mintFee = newMintFee;
+        emit MintFeeUpdated(old, newMintFee);
+    }
+
+    // ─── Pause ────────────────────────────────────────────────────────────────
+
+    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _pause();
+    }
+
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _unpause();
+    }
+
+    // ─── ERC-8004: Agent Wallet ───────────────────────────────────────────────
+
+    function getAgentWallet(uint256 agentId) external view override returns (address) {
+        return _agentWallet[agentId];
+    }
+
+    function setAgentWallet(
+        uint256 agentId,
+        address newWallet,
+        uint256 deadline,
+        bytes calldata signature
+    ) external override {
+        require(ownerOf(agentId) == msg.sender, "Not owner");
+        require(newWallet != address(0), "Zero address");
+        require(block.timestamp <= deadline, "Signature expired");
+        bytes32 structHash = keccak256(abi.encode(SET_AGENT_WALLET_TYPEHASH, agentId, newWallet, deadline));
+        address signer = ECDSA.recover(_hashTypedDataV4(structHash), signature);
+        require(signer == newWallet, "Invalid wallet signature");
+        _agentWallet[agentId] = newWallet;
+        emit AgentWalletSet(agentId, newWallet);
+    }
+
+    function unsetAgentWallet(uint256 agentId) external override {
+        require(ownerOf(agentId) == msg.sender, "Not owner");
+        delete _agentWallet[agentId];
+        emit AgentWalletSet(agentId, address(0));
     }
 
     // ─── Misc ─────────────────────────────────────────────────────────────────
@@ -486,47 +349,18 @@ contract AgentRegistry is IERC7857, ERC721URIStorage, EIP712, ReentrancyGuard {
         return _nextTokenId;
     }
 
-    // ─── Internal Helpers ─────────────────────────────────────────────────────
-
-    function _setIntelligentData(uint256 tokenId, IntelligentData[] calldata datas) internal {
-        delete _intelligentData[tokenId];
-        for (uint256 i = 0; i < datas.length; i++) {
-            _intelligentData[tokenId].push(datas[i]);
+    /// @dev Clear agentWallet on transfer (ERC-8004 requirement).
+    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
+        address from = super._update(to, tokenId, auth);
+        // ERC-8004: clear verified wallet on transfer so new owner must re-verify
+        if (from != address(0) && to != address(0)) {
+            delete _agentWallet[tokenId];
+            emit AgentWalletSet(tokenId, address(0));
         }
-        emit IntelligentDataSet(tokenId, _intelligentData[tokenId]);
+        return from;
     }
 
-    function _clearAuthorizations(uint256 tokenId) internal {
-        address[] storage users = _authorizedUsers[tokenId];
-        for (uint256 i = 0; i < users.length; i++) {
-            address user = users[i];
-            _isAuthorizedUser[tokenId][user] = false;
-            _isAuthorizedToken[user][tokenId] = false;
-            uint256[] storage tokens = _authorizedTokens[user];
-            for (uint256 j = 0; j < tokens.length; j++) {
-                if (tokens[j] == tokenId) {
-                    tokens[j] = tokens[tokens.length - 1];
-                    tokens.pop();
-                    break;
-                }
-            }
-            emit UsageRevoked(tokenId, user);
-        }
-        delete _authorizedUsers[tokenId];
-    }
-
-    function _isReservedKey(string memory key) internal pure returns (bool) {
-        return keccak256(bytes(key)) == keccak256(bytes(AGENT_WALLET_KEY));
-    }
-
-    function _isOwnerOrOperator(uint256 agentId, address caller) internal view returns (bool) {
-        address owner = ownerOf(agentId);
-        return owner == caller || isApprovedForAll(owner, caller) || getApproved(agentId) == caller;
-    }
-
-    // ─── ERC-165 ──────────────────────────────────────────────────────────────
-
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721URIStorage) returns (bool) {
+    function supportsInterface(bytes4 interfaceId) public view override(ERC721, AccessControl, IERC165) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }
