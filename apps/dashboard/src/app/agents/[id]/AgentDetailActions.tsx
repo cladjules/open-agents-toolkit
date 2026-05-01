@@ -479,8 +479,10 @@ function TransferForm({ tokenId }: { tokenId: string }) {
       <input type="hidden" name="tokenId" value={tokenId} />
       <Field label="Recipient Address *" name="to" placeholder="0x…" required />
       <div className="rounded-lg border border-gray-800 bg-gray-950/40 px-3 py-2 text-xs text-gray-400">
-        Standard transfer only needs recipient address. If this token uses a
-        verifier, transfer proof data is generated automatically on the server.
+        <strong>Tip:</strong> Transfer your agent's ENS domain directly in ENS
+        manager for seamless cross-chain agent ownership transfer via our
+        relayer. Alternatively, if transferred here, you will need to transfer
+        the domain name after.
       </div>
       <SubmitButton isPending={isPending} label="Transfer" />
       <ResultBanner result={result} />
