@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.35;
 
-import { IAgentDataVerifier } from "./IAgentDataVerifier.sol";
-import { IERC721 } from "@openzeppelin/contracts/interfaces/IERC721.sol";
+import {IAgentDataVerifier} from "./IAgentDataVerifier.sol";
+import {IERC721} from "@openzeppelin/contracts/interfaces/IERC721.sol";
 
 /// @dev Encrypted / intelligent data item attached to a token.
 struct IntelligentData {
@@ -26,12 +26,23 @@ interface IAgentRegistry is IERC721 {
     event BaseURIUpdated(string oldBaseURI, string newBaseURI);
     event TokenURIUpdated(uint256 indexed tokenId, string newURI);
     event MetadataURIUpdated(uint256 indexed tokenId, string newURI);
-    event VerifierUpdated(address indexed oldVerifier, address indexed newVerifier);
+    event VerifierUpdated(
+        address indexed oldVerifier,
+        address indexed newVerifier
+    );
     event MintFeeUpdated(uint256 oldFee, uint256 newFee);
     event IntelligentDataSet(uint256 indexed tokenId, IntelligentData[] data);
-    event PublishedSealedKey(address indexed to, uint256 indexed tokenId, bytes[] sealedKeys);
+    event PublishedSealedKey(
+        address indexed to,
+        uint256 indexed tokenId,
+        bytes[] sealedKeys
+    );
     /// @notice ERC-8004: emitted on agent registration (mint).
-    event Registered(uint256 indexed agentId, string agentURI, address indexed owner);
+    event Registered(
+        uint256 indexed agentId,
+        string agentURI,
+        address indexed owner
+    );
     /// @notice ERC-8004: emitted when the agent wallet is updated or cleared.
     event AgentWalletSet(uint256 indexed agentId, address indexed newWallet);
 
@@ -68,9 +79,14 @@ interface IAgentRegistry is IERC721 {
 
     // ─── Data Accessors ───────────────────────────────────────────────────────
 
-    function intelligentDataOf(uint256 tokenId) external view returns (IntelligentData[] memory);
+    function intelligentDataOf(
+        uint256 tokenId
+    ) external view returns (IntelligentData[] memory);
 
-    function updateIntelligentData(uint256 tokenId, IntelligentData[] calldata newDatas) external;
+    function updateIntelligentData(
+        uint256 tokenId,
+        IntelligentData[] calldata newDatas
+    ) external;
 
     function tokenVerifier(uint256 tokenId) external view returns (address);
 
@@ -82,7 +98,11 @@ interface IAgentRegistry is IERC721 {
 
     function setTokenURI(uint256 tokenId, string calldata newURI) external;
 
-    function getMetadataUri(uint256 tokenId) external view returns (string memory);
+    function setMetadataURI(uint256 tokenId, string calldata newURI) external;
+
+    function getMetadataUri(
+        uint256 tokenId
+    ) external view returns (string memory);
 
     // ─── Fee Management ───────────────────────────────────────────────────────
 
@@ -101,7 +121,12 @@ interface IAgentRegistry is IERC721 {
     /// @param newWallet New payment address (must sign the EIP-712 payload).
     /// @param deadline  Unix timestamp after which the signature is invalid.
     /// @param signature 65-byte ECDSA signature from newWallet.
-    function setAgentWallet(uint256 agentId, address newWallet, uint256 deadline, bytes calldata signature) external;
+    function setAgentWallet(
+        uint256 agentId,
+        address newWallet,
+        uint256 deadline,
+        bytes calldata signature
+    ) external;
 
     /// @notice Clear the agent wallet back to address(0).
     function unsetAgentWallet(uint256 agentId) external;

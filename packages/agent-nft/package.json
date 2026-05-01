@@ -34,7 +34,6 @@
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "^1.2.8",
     "@open-agents-toolkit/core": "*",
-    "debug": "^4.4.3",
     "eciesjs": "^0.4.16",
     "ethers": "6.13.1",
     "viem": "^2.48.7"

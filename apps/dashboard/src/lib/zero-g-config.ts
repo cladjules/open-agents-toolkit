@@ -51,7 +51,9 @@ const ZERO_G_CONFIG_BY_CHAIN_ID: Record<ZeroGChainId, ZeroGConfig> = {
 export function getZeroGConfig(chainId: number): ZeroGConfig {
   const config = ZERO_G_CONFIG_BY_CHAIN_ID[chainId as ZeroGChainId];
   if (!config) {
-    throw new Error("Connect your wallet to a 0G network before uploading feedback.");
+    throw new Error(
+      "Connect your wallet to a 0G network before uploading feedback.",
+    );
   }
   return config;
 }

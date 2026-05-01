@@ -19,11 +19,18 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { decrypt, encrypt } from "eciesjs";
 import { NFTError } from "@open-agents-toolkit/core";
-import type { AgentNFTEncryptedData, AgentService } from "@open-agents-toolkit/core";
+import type {
+  AgentNFTEncryptedData,
+  AgentService,
+} from "@open-agents-toolkit/core";
 import type { Address, Hex } from "viem";
 import { encodeAbiParameters, keccak256, toHex, stringToHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { ZeroGReadOptions, readZeroGJSON, ZeroGStorageClient } from "./zero-g.js";
+import {
+  ZeroGReadOptions,
+  readZeroGJSON,
+  ZeroGStorageClient,
+} from "./zero-g.js";
 
 const ALGORITHM = "aes-256-gcm";
 const KEY_LEN = 32;
@@ -39,6 +46,8 @@ export type ParseServicesOptions = {
   allowedServiceNames?: readonly string[];
 };
 export interface EncryptedBlob {
+  /** Name of the encrypted metadata */
+  name: string;
   /** Hex-encoded AES-256-GCM ciphertext */
   ciphertext: string;
   /** Hex-encoded IV (12 bytes) */
@@ -58,11 +67,17 @@ export function generateContentKey(): Uint8Array {
   return randomBytes(KEY_LEN);
 }
 
-function normalizeHexBytes(value: string | Uint8Array, label: string): Uint8Array {
+function normalizeHexBytes(
+  value: string | Uint8Array,
+  label: string,
+): Uint8Array {
   if (value instanceof Uint8Array) return value;
   const hex = value.startsWith("0x") ? value.slice(2) : value;
   if (hex.length === 0 || hex.length % 2 !== 0) {
-    throw new NFTError("ENCRYPTION_FAILED", `${label} must be a non-empty hex string.`);
+    throw new NFTError(
+      "ENCRYPTION_FAILED",
+      `${label} must be a non-empty hex string.`,
+    );
   }
   return Buffer.from(hex, "hex");
 }
@@ -72,6 +87,7 @@ function normalizeHexBytes(value: string | Uint8Array, label: string): Uint8Arra
  * Returns an EncryptedBlob ready for object storage.
  */
 export function encryptMetadata(
+  name: string,
   metadata: unknown,
   contentKey: Uint8Array,
   keyEncryptionPublicKey: string | Uint8Array,
@@ -82,13 +98,20 @@ export function encryptMetadata(
     const cipher = createCipheriv(ALGORITHM, Buffer.from(contentKey), iv, {
       authTagLength: AUTH_TAG_LEN,
     });
-    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    const ciphertext = Buffer.concat([
+      cipher.update(plaintext),
+      cipher.final(),
+    ]);
     const authTag = cipher.getAuthTag();
 
-    const recipientPublicKey = normalizeHexBytes(keyEncryptionPublicKey, "keyEncryptionPublicKey");
+    const recipientPublicKey = normalizeHexBytes(
+      keyEncryptionPublicKey,
+      "keyEncryptionPublicKey",
+    );
     const wrappedKey = encrypt(recipientPublicKey, Buffer.from(contentKey));
 
     return {
+      name,
       ciphertext: ciphertext.toString("hex"),
       iv: iv.toString("hex"),
       authTag: authTag.toString("hex"),
@@ -96,7 +119,11 @@ export function encryptMetadata(
       algorithm: ALGORITHM,
     };
   } catch (err) {
-    throw new NFTError("ENCRYPTION_FAILED", `Metadata encryption failed: ${String(err)}`, err);
+    throw new NFTError(
+      "ENCRYPTION_FAILED",
+      `Metadata encryption failed: ${String(err)}`,
+      err,
+    );
   }
 }
 
@@ -108,11 +135,21 @@ export function decryptContentKey(
   keyEncryptionPrivateKey: string | Uint8Array,
 ): Uint8Array {
   try {
-    const wrappedKey = normalizeHexBytes(blob.encryptedKey, "blob.encryptedKey");
-    const privateKey = normalizeHexBytes(keyEncryptionPrivateKey, "keyEncryptionPrivateKey");
+    const wrappedKey = normalizeHexBytes(
+      blob.encryptedKey,
+      "blob.encryptedKey",
+    );
+    const privateKey = normalizeHexBytes(
+      keyEncryptionPrivateKey,
+      "keyEncryptionPrivateKey",
+    );
     return decrypt(privateKey, wrappedKey);
   } catch (err) {
-    throw new NFTError("DECRYPTION_FAILED", `Content key decryption failed: ${String(err)}`, err);
+    throw new NFTError(
+      "DECRYPTION_FAILED",
+      `Content key decryption failed: ${String(err)}`,
+      err,
+    );
   }
 }
 
@@ -120,7 +157,10 @@ export function decryptContentKey(
  * Decrypt an EncryptedBlob back to its original JSON payload.
  * The caller must supply the content key (retrieved after ownership verification).
  */
-export function decryptMetadata<T>(blob: EncryptedBlob, contentKey: Uint8Array): T {
+export function decryptMetadata<T>(
+  blob: EncryptedBlob,
+  contentKey: Uint8Array,
+): T {
   try {
     const iv = Buffer.from(blob.iv, "hex");
     const authTag = Buffer.from(blob.authTag, "hex");
@@ -131,10 +171,17 @@ export function decryptMetadata<T>(blob: EncryptedBlob, contentKey: Uint8Array):
     });
     decipher.setAuthTag(authTag);
 
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    const plaintext = Buffer.concat([
+      decipher.update(ciphertext),
+      decipher.final(),
+    ]);
     return JSON.parse(plaintext.toString("utf8")) as T;
   } catch (err) {
-    throw new NFTError("DECRYPTION_FAILED", `Metadata decryption failed: ${String(err)}`, err);
+    throw new NFTError(
+      "DECRYPTION_FAILED",
+      `Metadata decryption failed: ${String(err)}`,
+      err,
+    );
   }
 }
 
@@ -142,7 +189,9 @@ export function decryptMetadata<T>(blob: EncryptedBlob, contentKey: Uint8Array):
  * Compute the keccak256 hash of the serialised EncryptedBlob.
  * This hash is stored on-chain as the integrity anchor.
  */
-export async function hashEncryptedBlob(blob: EncryptedBlob): Promise<`0x${string}`> {
+export async function hashEncryptedBlob(
+  blob: EncryptedBlob,
+): Promise<`0x${string}`> {
   return keccak256(stringToHex(JSON.stringify(blob)));
 }
 
@@ -156,14 +205,20 @@ export function parseAgentServicesJson(
       return { error: "Services must be a JSON array." };
     }
 
-    if (parsed.some((service) => !service?.name?.trim() || !service?.endpoint?.trim())) {
+    if (
+      parsed.some(
+        (service) => !service?.name?.trim() || !service?.endpoint?.trim(),
+      )
+    ) {
       return { error: "Each service must have a name and endpoint." };
     }
 
     const services = parsed.map((service) => {
       const name = String(service.name).trim();
       const endpoint = String(service.endpoint).trim();
-      const version = service.version ? String(service.version).trim() : undefined;
+      const version = service.version
+        ? String(service.version).trim()
+        : undefined;
 
       return version
         ? ({ name, endpoint, version } as AgentService)
@@ -174,7 +229,8 @@ export function parseAgentServicesJson(
       const allowed = new Set(options.allowedServiceNames);
       if (services.some((service) => !allowed.has(service.name))) {
         return {
-          error: "Unsupported service name. Only EIP-8004 service names are allowed.",
+          error:
+            "Unsupported service name. Only EIP-8004 service names are allowed.",
         };
       }
     }
@@ -191,9 +247,15 @@ export function buildAgentServiceTraits(services: readonly AgentService[]) {
   ];
 
   for (const service of services) {
-    traits.push({ trait_type: `Service: ${service.name}`, value: service.endpoint });
+    traits.push({
+      trait_type: `Service: ${service.name}`,
+      value: service.endpoint,
+    });
     if (service.version) {
-      traits.push({ trait_type: `Service Version: ${service.name}`, value: service.version });
+      traits.push({
+        trait_type: `Service Version: ${service.name}`,
+        value: service.version,
+      });
     }
   }
 
@@ -217,16 +279,18 @@ export async function readJsonFromUri<T>(
   return (await response.json()) as T;
 }
 
-export function getPrivateMetadataEntries(systemPrompt: string, characterDef: string) {
+export function getPrivateMetadataEntries(
+  systemPrompt: string,
+  characterDef: string,
+) {
   const entries: Array<{ name: string; value: unknown }> = [];
 
   if (systemPrompt) {
     entries.push({ name: "systemPrompt", value: systemPrompt });
   }
 
-  const intelligentData = JSON.parse(characterDef || "{}");
-  for (const [name, value] of Object.entries(intelligentData)) {
-    entries.push({ name, value });
+  if (characterDef) {
+    entries.push({ name: "characterDefinition", value: characterDef });
   }
 
   return entries;
@@ -239,13 +303,27 @@ export async function uploadEncryptedIntelligentData(params: {
   zeroGPrivateKey: string;
   rpcUrl: string;
 }): Promise<AgentNFTEncryptedData[]> {
-  const { systemPrompt, characterDef, keyEncryptionPublicKey, zeroGPrivateKey, rpcUrl } = params;
-  const storage = new ZeroGStorageClient({ privateKey: zeroGPrivateKey, rpcUrl });
+  const {
+    systemPrompt,
+    characterDef,
+    keyEncryptionPublicKey,
+    zeroGPrivateKey,
+    rpcUrl,
+  } = params;
+  const storage = new ZeroGStorageClient({
+    privateKey: zeroGPrivateKey,
+    rpcUrl,
+  });
   const contentKey = generateContentKey();
   const intelligentData: AgentNFTEncryptedData[] = [];
 
   for (const entry of getPrivateMetadataEntries(systemPrompt, characterDef)) {
-    const encryptedBlob = encryptMetadata(entry.value, contentKey, keyEncryptionPublicKey);
+    const encryptedBlob = encryptMetadata(
+      entry.name,
+      entry.value,
+      contentKey,
+      keyEncryptionPublicKey,
+    );
     const hash = await hashEncryptedBlob(encryptedBlob);
     const upload = await storage.uploadJSON(encryptedBlob);
     intelligentData.push({ name: entry.name, uri: upload.url, hash });
@@ -300,8 +378,12 @@ export async function buildSecureTransferPayloads(params: {
     const newDataHash = newDataHashes[index] as Hex;
     const encryptedPubKey = encodeAbiParameters([{ type: "address" }], [to]);
     const timestamp = now();
-    const accessNonce = toHex(`access:${tokenId.toString()}:${index}:${timestamp}`);
-    const ownershipNonce = toHex(`ownership:${tokenId.toString()}:${index}:${timestamp}`);
+    const accessNonce = toHex(
+      `access:${tokenId.toString()}:${index}:${timestamp}`,
+    );
+    const ownershipNonce = toHex(
+      `ownership:${tokenId.toString()}:${index}:${timestamp}`,
+    );
 
     const generatedSealedKey = keccak256(
       encodeAbiParameters(
@@ -318,7 +400,12 @@ export async function buildSecureTransferPayloads(params: {
 
     const accessInnerHash = keccak256(
       encodeAbiParameters(
-        [{ type: "bytes32" }, { type: "bytes32" }, { type: "bytes" }, { type: "bytes" }],
+        [
+          { type: "bytes32" },
+          { type: "bytes32" },
+          { type: "bytes" },
+          { type: "bytes" },
+        ],
         [oldDataHash, newDataHash, encryptedPubKey, accessNonce],
       ),
     );
@@ -332,7 +419,13 @@ export async function buildSecureTransferPayloads(params: {
           { type: "bytes" },
           { type: "bytes" },
         ],
-        [oldDataHash, newDataHash, generatedSealedKey, encryptedPubKey, ownershipNonce],
+        [
+          oldDataHash,
+          newDataHash,
+          generatedSealedKey,
+          encryptedPubKey,
+          ownershipNonce,
+        ],
       ),
     );
 
@@ -366,7 +459,11 @@ export async function buildSecureTransferPayloads(params: {
   return { newDataHashes, sealedKey, accessPayloads, ownershipProofs };
 }
 
-export function buildDecryptMessage(agentId: string, ownerAddress: string, signedAt: number) {
+export function buildDecryptMessage(
+  agentId: string,
+  ownerAddress: string,
+  signedAt: number,
+) {
   return `Open Agents Toolkit decrypt request\nagentId:${agentId}\nowner:${ownerAddress.toLowerCase()}\nsignedAt:${signedAt}`;
 }
 
@@ -374,10 +471,12 @@ export function decryptEncryptedBlob(
   blob: Record<string, unknown>,
   oraclePrivateKey: Hex,
 ): unknown {
-  const encryptedKey = typeof blob.encryptedKey === "string" ? blob.encryptedKey : "";
+  const encryptedKey =
+    typeof blob.encryptedKey === "string" ? blob.encryptedKey : "";
   const ciphertext = typeof blob.ciphertext === "string" ? blob.ciphertext : "";
   const iv = typeof blob.iv === "string" ? blob.iv : "";
   const authTag = typeof blob.authTag === "string" ? blob.authTag : "";
+  const name = typeof blob.name === "string" ? blob.name : "";
 
   if (!encryptedKey || !ciphertext || !iv || !authTag) {
     throw new Error("Encrypted blob format is invalid.");
@@ -386,6 +485,7 @@ export function decryptEncryptedBlob(
   const contentKey = decryptContentKey({ encryptedKey }, oraclePrivateKey);
   return decryptMetadata(
     {
+      name,
       encryptedKey,
       ciphertext,
       iv,

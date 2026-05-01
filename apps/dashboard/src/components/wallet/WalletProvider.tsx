@@ -14,6 +14,7 @@ import type { Address, Chain, PublicClient, WalletClient } from "viem";
 import { custom, createPublicClient, createWalletClient } from "viem";
 import { mainnet, sepolia } from "viem/chains";
 import { getZeroGConfig, toChain } from "@/lib/zero-g-config";
+import { APP_CHAIN } from "@/lib/config";
 
 type ProviderLike = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -50,18 +51,20 @@ interface WalletContextValue {
 
 const SESSION_KEY_PREFIX = "eip6963:";
 
-const CHAIN_BY_ID: Record<number, Chain> = {
-  [sepolia.id]: sepolia,
-  [mainnet.id]: mainnet,
-  16602: toChain(getZeroGConfig(16602)),
-  16661: toChain(getZeroGConfig(16661)),
+const CHAIN_BY_ID: Record<string, Chain> = {
+  [sepolia.id.toString()]: sepolia,
+  [mainnet.id.toString()]: mainnet,
+  "16602": toChain(getZeroGConfig(16602)),
+  "16661": toChain(getZeroGConfig(16661)),
 };
 
 const WalletContext = createContext<WalletContextValue | null>(null);
 
 let providersDiscoveryPromise: Promise<EIP6963ProviderDetail[]> | null = null;
 
-async function discoverProviders(timeoutMs = 350): Promise<EIP6963ProviderDetail[]> {
+async function discoverProviders(
+  timeoutMs = 350,
+): Promise<EIP6963ProviderDetail[]> {
   if (typeof window === "undefined") return [];
   if (providersDiscoveryPromise) return providersDiscoveryPromise;
 
@@ -75,12 +78,18 @@ async function discoverProviders(timeoutMs = 350): Promise<EIP6963ProviderDetail
     };
 
     const finish = () => {
-      window.removeEventListener("eip6963:announceProvider", onAnnounceProvider as EventListener);
+      window.removeEventListener(
+        "eip6963:announceProvider",
+        onAnnounceProvider as EventListener,
+      );
       resolve(Array.from(providersByRdns.values()));
       providersDiscoveryPromise = null;
     };
 
-    window.addEventListener("eip6963:announceProvider", onAnnounceProvider as EventListener);
+    window.addEventListener(
+      "eip6963:announceProvider",
+      onAnnounceProvider as EventListener,
+    );
     window.dispatchEvent(new Event("eip6963:requestProvider"));
     window.setTimeout(finish, timeoutMs);
   });
@@ -104,20 +113,23 @@ function findStoredProviderRdns() {
 }
 
 function resolveChain(chainId: number): Chain {
-  return CHAIN_BY_ID[chainId] ?? {
-    id: chainId,
-    name: `Chain ${chainId}`,
-    nativeCurrency: {
-      decimals: 18,
-      name: "Native Token",
-      symbol: "ETH",
-    },
-    rpcUrls: {
-      default: {
-        http: [],
+  return (
+    CHAIN_BY_ID[chainId] ??
+    ({
+      id: chainId,
+      name: `Chain ${chainId}`,
+      nativeCurrency: {
+        decimals: 18,
+        name: "Native Token",
+        symbol: "ETH",
       },
-    },
-  } as Chain;
+      rpcUrls: {
+        default: {
+          http: [],
+        },
+      },
+    } as Chain)
+  );
 }
 
 async function resolveProvider(preferredRdns?: string | null) {
@@ -127,8 +139,9 @@ async function resolveProvider(preferredRdns?: string | null) {
   }
 
   return (
-    (preferredRdns ? providers.find((entry) => entry.info.rdns === preferredRdns) : undefined) ??
-    providers[0]
+    (preferredRdns
+      ? providers.find((entry) => entry.info.rdns === preferredRdns)
+      : undefined) ?? providers[0]
   );
 }
 
@@ -139,22 +152,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [chainId, setChainId] = useState<number | null>(null);
   const [status, setStatus] = useState<WalletStatus>("idle");
 
-  const persistSession = useCallback((nextAddress: Address, nextChainId: number, rdns: string) => {
-    try {
-      localStorage.setItem(
-        SESSION_KEY_PREFIX + rdns,
-        JSON.stringify({
-          connectionMethod: "eip6963",
-          address: nextAddress,
-          chainId: nextChainId,
-          sessionData: rdns,
-          connectedAt: Date.now(),
-        }),
-      );
-    } catch {
-      // ignore storage errors
-    }
-  }, []);
+  const persistSession = useCallback(
+    (nextAddress: Address, chainId: number, rdns: string) => {
+      try {
+        localStorage.setItem(
+          SESSION_KEY_PREFIX + rdns,
+          JSON.stringify({
+            connectionMethod: "eip6963",
+            address: nextAddress,
+            chainId: chainId,
+            sessionData: rdns,
+            connectedAt: Date.now(),
+          }),
+        );
+      } catch {
+        // ignore storage errors
+      }
+    },
+    [],
+  );
 
   const clearSession = useCallback(() => {
     try {
@@ -168,9 +184,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const connect = useCallback(async () => {
     setStatus("connecting");
-    const detail = await resolveProvider(sessionRdnsRef.current ?? findStoredProviderRdns());
+    const detail = await resolveProvider(
+      sessionRdnsRef.current ?? findStoredProviderRdns(),
+    );
     const provider = detail.provider as ProviderLike;
-    const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+    const accounts = (await provider.request({
+      method: "eth_requestAccounts",
+    })) as string[];
 
     if (!accounts.length) {
       setStatus("idle");
@@ -178,17 +198,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     const nextAddress = accounts[0] as Address;
-    const hexChainId = (await provider.request({ method: "eth_chainId" })) as string;
-    const nextChainId = parseInt(hexChainId, 16);
+    const hexChainId = (await provider.request({
+      method: "eth_chainId",
+    })) as string;
+    const chainId = parseInt(hexChainId, 16);
 
     providerRef.current = provider;
     sessionRdnsRef.current = detail.info.rdns;
     setAddress(nextAddress);
-    setChainId(nextChainId);
+    setChainId(chainId);
     setStatus("connected");
-    persistSession(nextAddress, nextChainId, detail.info.rdns);
+    persistSession(nextAddress, chainId, detail.info.rdns);
 
-    return { address: nextAddress, chainId: nextChainId };
+    return { address: nextAddress, chainId: chainId };
   }, [persistSession]);
 
   const disconnect = useCallback(async () => {
@@ -214,22 +236,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const getViemClients = useCallback(async () => {
     let nextAddress = address;
-    let nextChainId = chainId;
 
-    if (!providerRef.current || !nextAddress || !nextChainId) {
+    if (!providerRef.current || !nextAddress) {
       const connected = await connect();
       nextAddress = connected.address;
-      nextChainId = connected.chainId;
     }
 
     const provider = providerRef.current;
-    if (!provider || !nextAddress || !nextChainId) {
+    if (!provider || !nextAddress) {
       throw new Error("Wallet is not connected.");
     }
 
-    const chain = resolveChain(nextChainId);
+    const chain = APP_CHAIN;
     const transport = custom(provider);
-    const walletClient = createWalletClient({ account: nextAddress, chain, transport });
+    const walletClient = createWalletClient({
+      account: nextAddress,
+      chain,
+      transport,
+    });
     const publicClient = createPublicClient({ chain, transport });
     return { address: nextAddress, walletClient, publicClient };
   }, [address, chainId, connect]);
@@ -244,22 +268,26 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       try {
         const detail = await resolveProvider(storedRdns);
         const provider = detail.provider as ProviderLike;
-        const accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+        const accounts = (await provider.request({
+          method: "eth_accounts",
+        })) as string[];
         if (!accounts.length || cancelled) {
           clearSession();
           return;
         }
 
         const nextAddress = accounts[0] as Address;
-        const hexChainId = (await provider.request({ method: "eth_chainId" })) as string;
-        const nextChainId = parseInt(hexChainId, 16);
+        const hexChainId = (await provider.request({
+          method: "eth_chainId",
+        })) as string;
+        const chainId = parseInt(hexChainId, 16);
 
         providerRef.current = provider;
         sessionRdnsRef.current = detail.info.rdns;
         setAddress(nextAddress);
-        setChainId(nextChainId);
+        setChainId(chainId);
         setStatus("connected");
-        persistSession(nextAddress, nextChainId, detail.info.rdns);
+        persistSession(nextAddress, chainId, detail.info.rdns);
       } catch {
         if (!cancelled) {
           clearSession();
@@ -275,11 +303,29 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [clearSession, persistSession]);
 
   const value = useMemo<WalletContextValue>(
-    () => ({ address, chainId, status, connect, disconnect, getEip1193Provider, getViemClients }),
-    [address, chainId, status, connect, disconnect, getEip1193Provider, getViemClients],
+    () => ({
+      address,
+      chainId,
+      status,
+      connect,
+      disconnect,
+      getEip1193Provider,
+      getViemClients,
+    }),
+    [
+      address,
+      chainId,
+      status,
+      connect,
+      disconnect,
+      getEip1193Provider,
+      getViemClients,
+    ],
   );
 
-  return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
+  return (
+    <WalletContext.Provider value={value}>{children}</WalletContext.Provider>
+  );
 }
 
 export function useWallet() {

@@ -1,36 +1,36 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { parseEventLogs, namehash, createPublicClient, createWalletClient, http, custom, parseAbi } from "viem";
-import { mainnet, sepolia } from "viem/chains";
+import {
+  parseEventLogs,
+  namehash,
+  createPublicClient,
+  createWalletClient,
+  http,
+  custom,
+  parseAbi,
+} from "viem";
+import { sepolia } from "viem/chains";
 import { ENS_AGENT_REGISTRY_ABI } from "@open-agents-toolkit/agent-nft/browser";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { prepareCreateAgent } from "@/lib/actions/agents";
-
-// ENS network/registry are client-configurable to support Sepolia (testnet) and Mainnet.
-const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "").toLowerCase();
-const ENS_CHAIN = ["sepolia", "0gtestnet"].includes(NETWORK.toLowerCase())
-  ? sepolia
-  : mainnet;
-const ENS_REGISTRY_ADDRESS =
-  (process.env.NEXT_PUBLIC_ENS_REGISTRY_ADDRESS as `0x${string}`)
-const RELAYER_ADDRESS = (process.env.NEXT_PUBLIC_ENS_RELAYER_ADDRESS ?? "") as `0x${string}`;
-const ENS_RPC_URL = ENS_CHAIN.id === sepolia.id
-  ? "https://ethereum-sepolia-rpc.publicnode.com"
-  : "https://ethereum-rpc.publicnode.com";
+import { switchChainIfNeeded } from "@/lib/utils/chain-switching";
+import { ENS_CHAIN } from "@/lib/config";
+const ENS_REGISTRY_ADDRESS = process.env
+  .NEXT_PUBLIC_ENS_REGISTRY_ADDRESS as `0x${string}`;
+const ENS_RPC_URL =
+  ENS_CHAIN.id === sepolia.id
+    ? "https://ethereum-sepolia-rpc.publicnode.com"
+    : "https://ethereum-rpc.publicnode.com";
 
 const RESOLVER_ABI = parseAbi([
-  "function approve(bytes32 node, address operator, bool approved) external",
-  "function isApprovedFor(address owner, bytes32 node, address operator) external view returns (bool)",
   "function setText(bytes32 node, string calldata key, string calldata value) external",
-  "function text(bytes32 node, string calldata key) external view returns (string memory)",
 ]);
 const ENS_REGISTRY_ABI_INLINE = parseAbi([
   "function owner(bytes32 node) external view returns (address)",
   "function resolver(bytes32 node) external view returns (address)",
 ]);
 
-type ApprovalState = "idle" | "checking" | "approved" | "unapproved" | "approving" | "error";
 type OwnershipState = "idle" | "checking" | "owned" | "not-owned" | "error";
 
 const AGENT_TYPES = [
@@ -48,12 +48,25 @@ interface AgentService {
   version: string;
 }
 
-const EIP8004_SERVICE_NAMES: AgentService["name"][] = ["web", "A2A", "MCP", "OASF", "DID", "email"];
+const EIP8004_SERVICE_NAMES: AgentService["name"][] = [
+  "web",
+  "A2A",
+  "MCP",
+  "OASF",
+  "DID",
+  "email",
+];
 
 export default function NewAgentPage() {
   const { address, connect, getViemClients, getEip1193Provider } = useWallet();
   const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<{ tokenId?: bigint; txHash?: string; registryAddress?: `0x${string}`; textSynced?: boolean; error?: string } | null>(null);
+  const [result, setResult] = useState<{
+    tokenId?: bigint;
+    txHash?: string;
+    agentRegistry?: string;
+    textSynced?: boolean;
+    error?: string;
+  } | null>(null);
   const [textSyncPending, setTextSyncPending] = useState(false);
   const [textSyncError, setTextSyncError] = useState("");
   const [showPrivate, setShowPrivate] = useState(false);
@@ -67,81 +80,72 @@ export default function NewAgentPage() {
 
   // ENS name (required)
   const [ensName, setEnsName] = useState("");
-  const [approvalState, setApprovalState] = useState<ApprovalState>("idle");
-  const [approvalError, setApprovalError] = useState("");
   const [ownershipState, setOwnershipState] = useState<OwnershipState>("idle");
   const [ownershipError, setOwnershipError] = useState("");
   const ownershipSatisfied = ownershipState === "owned";
   const canCreate = !!ensName && ownershipSatisfied;
 
-  async function validateEnsOwnershipAndApproval(nameInput: string) {
+  async function validateEnsOwnership(nameInput: string) {
     const name = nameInput.trim().toLowerCase();
     if (!name || !address) {
       setOwnershipState("idle");
-      setApprovalState("idle");
-      (null);
       return false;
     }
 
     setOwnershipState("checking");
     setOwnershipError("");
-    setApprovalState("checking");
-    setApprovalError("");
-    (null);
 
     try {
       const node = namehash(name);
-      const ensClient = createPublicClient({ chain: ENS_CHAIN, transport: http(ENS_RPC_URL) });
+      const ensClient = createPublicClient({
+        chain: ENS_CHAIN as any,
+        transport: http(ENS_RPC_URL),
+      });
 
-      const currentOwner = await ensClient.readContract({
+      const currentOwner = (await ensClient.readContract({
         address: ENS_REGISTRY_ADDRESS,
         abi: ENS_REGISTRY_ABI_INLINE,
         functionName: "owner",
         args: [node],
-      }) as `0x${string}`;
+      })) as `0x${string}`;
 
-
-      if (!currentOwner || currentOwner.toLowerCase() !== address.toLowerCase()) {
+      if (
+        !currentOwner ||
+        currentOwner.toLowerCase() !== address.toLowerCase()
+      ) {
         setOwnershipState("not-owned");
-        setOwnershipError("Connected wallet is not the ENS owner for this name.");
-        setApprovalState("idle");
+        setOwnershipError(
+          "Connected wallet is not the ENS owner for this name.",
+        );
         return false;
       }
 
-      setOwnershipState("owned");
-
       // Look up the resolver for this node
-      const resolverAddr = await ensClient.readContract({
+      const resolverAddr = (await ensClient.readContract({
         address: ENS_REGISTRY_ADDRESS,
         abi: ENS_REGISTRY_ABI_INLINE,
         functionName: "resolver",
         args: [node],
-      }) as `0x${string}`;
-      if (!resolverAddr || resolverAddr === "0x0000000000000000000000000000000000000000") {
-        setApprovalState("error");
-        setApprovalError(`No resolver set for this ENS name on ${ENS_CHAIN.name}.`);
+      })) as `0x${string}`;
+      if (
+        !resolverAddr ||
+        resolverAddr === "0x0000000000000000000000000000000000000000"
+      ) {
+        setOwnershipState("error");
+        setOwnershipError(
+          `No resolver set for this ENS name on ${ENS_CHAIN.name}.`,
+        );
         return false;
       }
 
-      (resolverAddr);
-      if (!RELAYER_ADDRESS) {
-        setApprovalState("approved"); // no relayer configured, skip approval check
-        return true;
-      }
-      const approved = await ensClient.readContract({
-        address: resolverAddr,
-        abi: RESOLVER_ABI,
-        functionName: "isApprovedFor",
-        args: [address, node, RELAYER_ADDRESS],
-      });
-      setApprovalState(approved ? "approved" : "unapproved");
-      return Boolean(approved);
+      setOwnershipState("owned");
+      return true;
     } catch (e) {
-      console.log(e)
+      console.log(e);
       setOwnershipState("error");
-      setOwnershipError("Could not validate ENS ownership. Check the name and network.");
-      setApprovalState("error");
-      setApprovalError("Could not verify ENS approval. Check the name is valid.");
+      setOwnershipError(
+        "Could not validate ENS ownership. Check the name and network.",
+      );
       return false;
     }
   }
@@ -150,135 +154,66 @@ export default function NewAgentPage() {
     setEnsName(value);
     setOwnershipState("idle");
     setOwnershipError("");
-    setApprovalState("idle");
-    setApprovalError("");
-    (null);
   }
 
   function handleEnsNameBlur() {
     if (!ensName.trim()) return;
-    void validateEnsOwnershipAndApproval(ensName);
-  }
-
-  async function handleApprove() {
-    if (!ensName || !address) return;
-    setApprovalState("approving");
-    setApprovalError("");
-    try {
-      const node = namehash(ensName);
-      const provider = await getEip1193Provider();
-      const targetChainIdHex = `0x${ENS_CHAIN.id.toString(16)}`;
-      const targetRpc = ENS_CHAIN.rpcUrls.default.http[0] ?? "";
-
-      // Switch to configured ENS chain.
-      try {
-        await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: targetChainIdHex }] });
-      } catch (e: unknown) {
-        const err = e as { code?: number };
-        if (err?.code === 4902) {
-          await provider.request({
-            method: "wallet_addEthereumChain",
-            params: [{
-              chainId: targetChainIdHex,
-              chainName: ENS_CHAIN.name,
-              rpcUrls: targetRpc ? [targetRpc] : [],
-              nativeCurrency: ENS_CHAIN.nativeCurrency,
-            }],
-          });
-        } else throw e;
-      }
-      const ensPublic = createPublicClient({ chain: ENS_CHAIN, transport: custom(provider) });
-      const ensWallet = createWalletClient({ account: address, chain: ENS_CHAIN, transport: custom(provider) });
-
-      // Look up resolver
-      const resolverAddr = await ensPublic.readContract({
-        address: ENS_REGISTRY_ADDRESS,
-        abi: ENS_REGISTRY_ABI_INLINE,
-        functionName: "resolver",
-        args: [node],
-      }) as `0x${string}`;
-
-      const hash = await ensWallet.writeContract({
-        address: resolverAddr,
-        abi: RESOLVER_ABI,
-        functionName: "approve",
-        args: [node, RELAYER_ADDRESS, true],
-      });
-      await ensPublic.waitForTransactionReceipt({ hash });
-      setApprovalState("approved");
-    } catch (e: unknown) {
-      const err = e as { message?: string };
-      setApprovalState("unapproved");
-      setApprovalError(err?.message ?? "Approval transaction failed.");
-    }
+    void validateEnsOwnership(ensName);
   }
 
   async function handleSyncTextRecords() {
-    if (!result?.tokenId || !result.registryAddress || !ensName || !address) return;
+    if (
+      result?.tokenId === undefined ||
+      !result?.agentRegistry ||
+      !ensName ||
+      !address
+    )
+      return;
     setTextSyncPending(true);
     setTextSyncError("");
     try {
+      // Switch to Ethereum (Sepolia/Mainnet) for ENS operations
+      await switchChainIfNeeded(getEip1193Provider, true);
+
       const node = namehash(ensName);
       const provider = await getEip1193Provider();
-      const targetChainIdHex = `0x${ENS_CHAIN.id.toString(16)}`;
-      const targetRpc = ENS_CHAIN.rpcUrls.default.http[0] ?? "";
-
-      // Switch to ENS chain
-      try {
-        await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: targetChainIdHex }] });
-      } catch (e: unknown) {
-        const err = e as { code?: number };
-        if (err?.code === 4902) {
-          await provider.request({
-            method: "wallet_addEthereumChain",
-            params: [{
-              chainId: targetChainIdHex,
-              chainName: ENS_CHAIN.name,
-              rpcUrls: targetRpc ? [targetRpc] : [],
-              nativeCurrency: ENS_CHAIN.nativeCurrency,
-            }],
-          });
-        } else throw e;
-      }
-
-      const ensPublic = createPublicClient({ chain: ENS_CHAIN, transport: custom(provider) });
-      const ensWallet = createWalletClient({ account: address, chain: ENS_CHAIN, transport: custom(provider) });
+      const ensPublic = createPublicClient({
+        chain: ENS_CHAIN as any,
+        transport: custom(provider),
+      });
+      const ensWallet = createWalletClient({
+        account: address,
+        chain: ENS_CHAIN as any,
+        transport: custom(provider),
+      });
 
       // Look up resolver
-      const resolverAddr = await ensPublic.readContract({
+      const resolverAddr = (await ensPublic.readContract({
         address: ENS_REGISTRY_ADDRESS,
         abi: ENS_REGISTRY_ABI_INLINE,
         functionName: "resolver",
         args: [node],
-      }) as `0x${string}`;
+      })) as `0x${string}`;
 
-      if (!resolverAddr || resolverAddr === "0x0000000000000000000000000000000000000000") {
+      if (
+        !resolverAddr ||
+        resolverAddr === "0x0000000000000000000000000000000000000000"
+      ) {
         throw new Error("No resolver set for this ENS name");
       }
 
       // Set text records
-      const agentIdStr = result.tokenId.toString();
-      const hash1 = await ensWallet.writeContract({
+      const hash = await ensWallet.writeContract({
         address: resolverAddr,
         abi: RESOLVER_ABI,
         functionName: "setText",
-        args: [node, "agentRegistry", result.registryAddress],
+        args: [node, "agentRegistry", result.agentRegistry],
         chain: ensWallet.chain,
         account: ensWallet.account!,
       });
-      await ensPublic.waitForTransactionReceipt({ hash: hash1 });
+      await ensPublic.waitForTransactionReceipt({ hash: hash });
 
-      const hash2 = await ensWallet.writeContract({
-        address: resolverAddr,
-        abi: RESOLVER_ABI,
-        functionName: "setText",
-        args: [node, "agentId", agentIdStr],
-        chain: ensWallet.chain,
-        account: ensWallet.account!,
-      });
-      await ensPublic.waitForTransactionReceipt({ hash: hash2 });
-
-      setResult((prev) => prev ? { ...prev, textSynced: true } : null);
+      setResult((prev) => (prev ? { ...prev, textSynced: true } : null));
       setTextSyncPending(false);
     } catch (e: unknown) {
       const err = e as { message?: string };
@@ -287,8 +222,16 @@ export default function NewAgentPage() {
     }
   }
 
-  function updateService(index: number, field: "endpoint" | "version", value: string) {
-    setServices((prev) => prev.map((service, i) => (i === index ? { ...service, [field]: value } : service)));
+  function updateService(
+    index: number,
+    field: "endpoint" | "version",
+    value: string,
+  ) {
+    setServices((prev) =>
+      prev.map((service, i) =>
+        i === index ? { ...service, [field]: value } : service,
+      ),
+    );
   }
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -317,13 +260,19 @@ export default function NewAgentPage() {
 
     startTransition(async () => {
       try {
-        const valid = await validateEnsOwnershipAndApproval(ensName);
+        const valid = await validateEnsOwnership(ensName);
         if (!valid) {
           if (ownershipState === "not-owned") {
-            setResult({ error: "Cannot create agent: connected wallet does not own this ENS name." });
+            setResult({
+              error:
+                "Cannot create agent: connected wallet does not own this ENS name.",
+            });
             return;
           }
-          setResult({ error: "ENS validation failed. Ensure the connected wallet owns this name and relayer approval is set if required." });
+          setResult({
+            error:
+              "ENS validation failed. Ensure the connected wallet owns this name and it has a resolver set.",
+          });
           return;
         }
 
@@ -337,6 +286,7 @@ export default function NewAgentPage() {
           return;
         }
 
+        await switchChainIfNeeded(getEip1193Provider, false);
         const { publicClient, walletClient } = await getViemClients();
         const mintHash = await walletClient.writeContract({
           address: prepared.contractAddress!,
@@ -352,8 +302,9 @@ export default function NewAgentPage() {
           chain: walletClient.chain,
           account: walletClient.account!,
         });
-        const receipt = await publicClient.waitForTransactionReceipt({ hash: mintHash });
-        console.log(receipt)
+        const receipt = await publicClient.waitForTransactionReceipt({
+          hash: mintHash,
+        });
 
         const registeredLogs = parseEventLogs({
           abi: ENS_AGENT_REGISTRY_ABI,
@@ -362,12 +313,18 @@ export default function NewAgentPage() {
           strict: false,
         });
 
-        console.log(registeredLogs)
+        console.log(registeredLogs);
 
-        const registeredLog = registeredLogs[0] as { args?: { tokenId?: bigint } } | undefined;
+        const registeredLog = registeredLogs[0] as
+          | { args?: { tokenId?: bigint } }
+          | undefined;
         const tokenId = registeredLog?.args?.tokenId;
 
-        setResult({ tokenId, txHash: mintHash, registryAddress: prepared.registryAddress });
+        setResult({
+          tokenId,
+          txHash: mintHash,
+          agentRegistry: prepared.agentRegistry,
+        });
       } catch (error) {
         setResult({
           error: error instanceof Error ? error.message : "Create failed.",
@@ -385,15 +342,22 @@ export default function NewAgentPage() {
           <h2 className="text-2xl font-bold text-green-400">Agent Created!</h2>
           <p className="text-gray-400">
             Token ID:{" "}
-            <span className="font-mono text-white font-semibold">#{result.tokenId.toString()}</span>
+            <span className="font-mono text-white font-semibold">
+              #{result.tokenId.toString()}
+            </span>
           </p>
           {result.txHash && (
-            <p className="font-mono text-xs text-gray-500 break-all">{result.txHash}</p>
+            <p className="font-mono text-xs text-gray-500 break-all">
+              {result.txHash}
+            </p>
           )}
           <div className="rounded-lg border border-amber-800/60 bg-amber-950/30 p-4 mt-6 space-y-2">
-            <p className="text-sm text-amber-200">Final step: Sync ENS text records on Sepolia</p>
+            <p className="text-sm text-amber-200">
+              Final step: Sync ENS text records on Sepolia
+            </p>
             <p className="text-xs text-gray-400">
-              This records the agent registry address and agent ID in your ENS name's text records.
+              This records the agent registry address and agent ID in your ENS
+              name's text records.
             </p>
             {textSyncError && (
               <p className="text-xs text-red-400">{textSyncError}</p>
@@ -402,7 +366,7 @@ export default function NewAgentPage() {
               type="button"
               onClick={() => void handleSyncTextRecords()}
               disabled={textSyncPending}
-              className="w-full px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors disabled:opacity-50"
+              className="w-full px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors disabled:opacity-50 cursor-pointer"
             >
               {textSyncPending ? "Syncing…" : "Sync Text Records"}
             </button>
@@ -436,10 +400,14 @@ export default function NewAgentPage() {
         </p>
         <p className="text-gray-400">
           Token ID:{" "}
-          <span className="font-mono text-white font-semibold">#{result.tokenId.toString()}</span>
+          <span className="font-mono text-white font-semibold">
+            #{result.tokenId.toString()}
+          </span>
         </p>
         {result.txHash && (
-          <p className="font-mono text-xs text-gray-500 break-all">{result.txHash}</p>
+          <p className="font-mono text-xs text-gray-500 break-all">
+            {result.txHash}
+          </p>
         )}
         <div className="flex gap-3 justify-center pt-4">
           <a
@@ -466,14 +434,18 @@ export default function NewAgentPage() {
         <div>
           <h1 className="text-3xl font-bold">Create Agent</h1>
           <p className="text-gray-400 mt-1">
-            Register an on-chain AI agent tied to your ENS name. Ownership follows ENS transfers on Sepolia.
+            Register an on-chain AI agent tied to your ENS name. Ownership
+            follows ENS transfers on Sepolia.
           </p>
         </div>
 
         <div className="rounded-2xl border border-violet-800/60 bg-violet-950/30 p-8 text-center space-y-4">
-          <h2 className="text-2xl font-semibold text-white">Connect Wallet First</h2>
+          <h2 className="text-2xl font-semibold text-white">
+            Connect Wallet First
+          </h2>
           <p className="text-sm text-gray-300 max-w-md mx-auto">
-            Agent creation is wallet-bound and requires your connected address as the owner.
+            Agent creation is wallet-bound and requires your connected address
+            as the owner.
           </p>
           <button
             type="button"
@@ -492,17 +464,23 @@ export default function NewAgentPage() {
       <div>
         <h1 className="text-3xl font-bold">Create Agent</h1>
         <p className="text-gray-400 mt-1">
-          Register an on-chain AI agent tied to your ENS name. Ownership follows ENS transfers on Sepolia.
+          Register an on-chain AI agent tied to your ENS name. Ownership follows
+          ENS transfers on Sepolia.
         </p>
-        <p className="text-xs text-gray-500 mt-2">Minting from connected wallet {address}</p>
+        <p className="text-xs text-gray-500 mt-2">
+          Minting from connected wallet {address}
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* ENS name (required) */}
         <fieldset className="space-y-3 p-5 rounded-xl border border-gray-800 bg-gray-900/50">
-          <legend className="px-2 text-sm font-semibold text-gray-300">ENS Name *</legend>
+          <legend className="px-2 text-sm font-semibold text-gray-300">
+            ENS Name *
+          </legend>
           <p className="text-xs text-gray-500">
-            Agent identity is derived from your ENS name. Ownership follows ENS name transfers on Sepolia.
+            Agent identity is derived from your ENS name. Ownership follows ENS
+            name transfers on Sepolia.
           </p>
           <div className="flex gap-3 items-start">
             <div className="flex-1">
@@ -517,55 +495,43 @@ export default function NewAgentPage() {
                 className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-violet-600 text-sm"
               />
               <div className="mt-2 space-y-2">
-                <p className="text-xs text-gray-500">Enter ENS manually. Ownership is validated on blur and before create.</p>
+                <p className="text-xs text-gray-500">
+                  Enter ENS manually. Ownership is validated on blur and before
+                  create.
+                </p>
               </div>
               {ownershipState === "checking" && (
-                <p className="text-xs text-gray-500 mt-1">Checking ENS ownership…</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Checking ENS ownership…
+                </p>
               )}
               {ownershipState === "owned" && (
-                <p className="text-xs text-green-400 mt-1">✓ Connected wallet owns this ENS name</p>
+                <p className="text-xs text-green-400 mt-1">
+                  ✓ Connected wallet owns this ENS name
+                </p>
               )}
               {ownershipState === "not-owned" && (
                 <p className="text-xs text-red-400 mt-1">{ownershipError}</p>
               )}
               {ownershipState === "error" && (
-                <p className="text-xs text-red-400 mt-1">{ownershipError || "Could not validate ENS ownership"}</p>
-              )}
-              {approvalState === "checking" && (
-                <p className="text-xs text-gray-500 mt-1">Checking ENS resolver…</p>
-              )}
-              {approvalState === "approved" && (
-                <p className="text-xs text-green-400 mt-1">✓ ENS name resolved{RELAYER_ADDRESS ? " · Relayer approved" : ""}</p>
-              )}
-              {approvalState === "unapproved" && (
-                <p className="text-xs text-amber-400 mt-1">Relayer not yet approved — approve below before creating</p>
-              )}
-              {approvalState === "error" && (
-                <p className="text-xs text-red-400 mt-1">{approvalError || "Could not resolve ENS name"}</p>
-              )}
-              {approvalState === "approving" && (
-                <p className="text-xs text-gray-400 mt-1">Waiting for approval tx on Sepolia…</p>
+                <p className="text-xs text-red-400 mt-1">
+                  {ownershipError || "Could not validate ENS ownership"}
+                </p>
               )}
             </div>
-            {(approvalState === "unapproved" || approvalState === "approving") && (
-              <button
-                type="button"
-                onClick={() => void handleApprove()}
-                disabled={approvalState === "approving"}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors disabled:opacity-50 whitespace-nowrap"
-              >
-                {approvalState === "approving" ? "Approving…" : "Approve Relayer"}
-              </button>
-            )}
           </div>
         </fieldset>
 
         {/* Identity */}
         <fieldset className="space-y-4 p-5 rounded-xl border border-gray-800 bg-gray-900/50">
-          <legend className="px-2 text-sm font-semibold text-gray-300">Identity</legend>
+          <legend className="px-2 text-sm font-semibold text-gray-300">
+            Identity
+          </legend>
 
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Owned By Wallet</label>
+            <label className="block text-sm text-gray-400 mb-1">
+              Owned By Wallet
+            </label>
             <input
               type="text"
               value={address}
@@ -574,7 +540,12 @@ export default function NewAgentPage() {
             />
           </div>
 
-          <Field label="Name *" name="name" placeholder="My Research Agent" required />
+          <Field
+            label="Name *"
+            name="name"
+            placeholder="My Research Agent"
+            required
+          />
           <Field
             label="Description *"
             name="description"
@@ -589,19 +560,29 @@ export default function NewAgentPage() {
                 className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 focus:outline-none focus:border-violet-600 text-sm"
               >
                 {AGENT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
                 ))}
               </select>
             </div>
-            <Field label="Image URL" name="imageUrl" type="url" placeholder="https://…" />
+            <Field
+              label="Image URL"
+              name="imageUrl"
+              type="url"
+              placeholder="https://…"
+            />
           </div>
         </fieldset>
 
         {/* Services */}
         <fieldset className="space-y-4 p-5 rounded-xl border border-gray-800 bg-gray-900/50">
-          <legend className="px-2 text-sm font-semibold text-gray-300">Services</legend>
+          <legend className="px-2 text-sm font-semibold text-gray-300">
+            Services
+          </legend>
           <p className="text-xs text-gray-500 px-2 -mt-2">
-            EIP-8004 services. Fill endpoints you support. ENS is included and read-only.
+            EIP-8004 services. Fill endpoints you support. ENS is included and
+            read-only.
           </p>
 
           <div className="space-y-4">
@@ -623,7 +604,9 @@ export default function NewAgentPage() {
                     <input
                       type="text"
                       value={service.endpoint}
-                      onChange={(e) => updateService(idx, "endpoint", e.target.value)}
+                      onChange={(e) =>
+                        updateService(idx, "endpoint", e.target.value)
+                      }
                       placeholder="Endpoint"
                       className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-500 text-sm"
                     />
@@ -632,7 +615,9 @@ export default function NewAgentPage() {
                     <input
                       type="text"
                       value={service.version}
-                      onChange={(e) => updateService(idx, "version", e.target.value)}
+                      onChange={(e) =>
+                        updateService(idx, "version", e.target.value)
+                      }
                       placeholder="Version"
                       className="w-full px-3 py-2 rounded-lg bg-gray-700 border border-gray-600 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-violet-500 text-sm"
                     />
@@ -681,19 +666,33 @@ export default function NewAgentPage() {
           >
             <span
               className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
-                showPrivate ? "bg-violet-600 border-violet-500" : "border-gray-600"
+                showPrivate
+                  ? "bg-violet-600 border-violet-500"
+                  : "border-gray-600"
               }`}
             >
               {showPrivate && (
-                <svg className="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 12 12">
-                  <path d="M10 3L5 8.5 2 5.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                <svg
+                  className="w-2.5 h-2.5 text-white"
+                  fill="currentColor"
+                  viewBox="0 0 12 12"
+                >
+                  <path
+                    d="M10 3L5 8.5 2 5.5"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
                 </svg>
               )}
             </span>
             Add private metadata (ERC-7857 encrypted NFT)
           </button>
           <p className="text-xs text-gray-600 mt-1 ml-6">
-            System prompt and character file — AES-256-GCM encrypted, stored on 0G Storage.
+            System prompt and character file — AES-256-GCM encrypted, stored on
+            0G Storage.
           </p>
         </div>
 
@@ -701,11 +700,15 @@ export default function NewAgentPage() {
           <fieldset className="space-y-4 p-5 rounded-xl border border-violet-900/50 bg-violet-950/20">
             <legend className="px-2 text-sm font-semibold text-violet-300">
               Private Metadata
-              <span className="text-violet-500 font-normal ml-1">— encrypted on-chain</span>
+              <span className="text-violet-500 font-normal ml-1">
+                — encrypted on-chain
+              </span>
             </legend>
 
             <div>
-              <label className="block text-sm text-gray-400 mb-1">System Prompt (SKILL.md)</label>
+              <label className="block text-sm text-gray-400 mb-1">
+                System Prompt (SKILL.md)
+              </label>
               <textarea
                 name="systemPrompt"
                 rows={10}
@@ -715,7 +718,9 @@ export default function NewAgentPage() {
             </div>
 
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Character Definition</label>
+              <label className="block text-sm text-gray-400 mb-1">
+                Character Definition
+              </label>
               <textarea
                 name="characterDef"
                 rows={10}
@@ -726,14 +731,18 @@ export default function NewAgentPage() {
               {characterDefError ? (
                 <p className="text-xs text-red-400 mt-1">{characterDefError}</p>
               ) : (
-                <p className="text-xs text-green-400 mt-1">Valid JSON template.</p>
+                <p className="text-xs text-green-400 mt-1">
+                  Valid JSON template.
+                </p>
               )}
             </div>
           </fieldset>
         )}
 
         {result?.error && (
-          <p className="text-sm text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">{result.error}</p>
+          <p className="text-sm text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">
+            {result.error}
+          </p>
         )}
 
         <div className="flex items-center gap-4">
@@ -744,7 +753,10 @@ export default function NewAgentPage() {
           >
             {isPending ? "Creating…" : "Create Agent"}
           </button>
-          <a href="/" className="text-sm text-gray-500 hover:text-gray-300 transition-colors">
+          <a
+            href="/"
+            className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          >
             Cancel
           </a>
         </div>

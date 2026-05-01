@@ -5,12 +5,24 @@
  * Frontend owns all write operations via direct viem contract calls.
  */
 
-import { AgentIdentity, AgentRegistrationFile, RegistryError } from "@open-agents-toolkit/core";
+import {
+  AgentIdentity,
+  AgentRegistrationFile,
+  RegistryError,
+} from "@open-agents-toolkit/core";
 import { Address, Hex } from "viem";
 import { PublicClient } from "viem";
-import { AGENT_REGISTRY_ABI, REPUTATION_REGISTRY_ABI, VALIDATION_REGISTRY_ABI } from "./abis.js";
+import {
+  AGENT_REGISTRY_ABI,
+  REPUTATION_REGISTRY_ABI,
+  VALIDATION_REGISTRY_ABI,
+} from "./abis.js";
 import { readZeroGJSON, ZeroGReadOptions } from "./zero-g.js";
-import createDebug from "debug";
+
+const createDebug =
+  (namespace: string) =>
+  (...args: unknown[]) =>
+    console.log(`[${namespace}]`, ...args);
 
 const log = createDebug("oat:registry");
 const logRead = createDebug("oat:registry:read");
@@ -75,7 +87,9 @@ export class AgentRegistry {
   /**
    * Resolve an agent's on-chain identity and fetch metadata from its URI.
    */
-  async resolve(agentId: bigint): Promise<AgentIdentity & { metadata: AgentRegistrationFile }> {
+  async resolve(
+    agentId: bigint,
+  ): Promise<AgentIdentity & { metadata: AgentRegistrationFile }> {
     logRead("resolve agentId=%s", agentId.toString());
     const [owner, agentWallet, metadataUri] = await Promise.all([
       this._cfg.publicClient.readContract({
@@ -100,7 +114,10 @@ export class AgentRegistry {
 
     let metadata: AgentRegistrationFile;
     if (metadataUri.startsWith("zerog://")) {
-      metadata = await readZeroGJSON<AgentRegistrationFile>(metadataUri, this._cfg.zeroG);
+      metadata = await readZeroGJSON<AgentRegistrationFile>(
+        metadataUri,
+        this._cfg.zeroG,
+      );
     } else {
       const res = await fetch(metadataUri);
       if (!res.ok) {
@@ -112,7 +129,12 @@ export class AgentRegistry {
       metadata = (await res.json()) as AgentRegistrationFile;
     }
 
-    logRead("resolved agentId=%s owner=%s name=%s", agentId.toString(), owner, metadata.name);
+    logRead(
+      "resolved agentId=%s owner=%s name=%s",
+      agentId.toString(),
+      owner,
+      metadata.name,
+    );
 
     return {
       agentId,
@@ -133,7 +155,7 @@ export class AgentRegistry {
    * @param tag2            Optional secondary tag filter.
    * @param includeRevoked  Include revoked feedback entries (default false).
    */
-  async getFeedback(
+  async getAllFeedbacks(
     agentId: bigint,
     clientAddresses: Address[] = [],
     tag1 = "",
@@ -141,7 +163,7 @@ export class AgentRegistry {
     includeRevoked = false,
   ): Promise<FeedbackEntry[]> {
     logReputation(
-      "getFeedback agentId=%s clients=%d tag1=%s tag2=%s includeRevoked=%s",
+      "getAllFeedbacks agentId=%s clients=%d tag1=%s tag2=%s includeRevoked=%s",
       agentId.toString(),
       clientAddresses.length,
       tag1,
@@ -155,8 +177,23 @@ export class AgentRegistry {
       args: [agentId, clientAddresses, tag1, tag2, includeRevoked],
     });
 
-    const [clients, feedbackIndexes, values, valueDecimalsList, tag1s, tag2s, revokedStatuses] =
-      raw as [Address[], bigint[], bigint[], number[], string[], string[], boolean[]];
+    const [
+      clients,
+      feedbackIndexes,
+      values,
+      valueDecimalsList,
+      tag1s,
+      tag2s,
+      revokedStatuses,
+    ] = raw as [
+      Address[],
+      bigint[],
+      bigint[],
+      number[],
+      string[],
+      string[],
+      boolean[],
+    ];
 
     const entries = clients.map((client, i) => ({
       client,
@@ -167,7 +204,11 @@ export class AgentRegistry {
       tag2: tag2s[i]!,
       isRevoked: revokedStatuses[i]!,
     }));
-    logReputation("getFeedback agentId=%s returned %d entries", agentId.toString(), entries.length);
+    logReputation(
+      "getAllFeedbacks agentId=%s returned %d entries",
+      agentId.toString(),
+      entries.length,
+    );
     return entries;
   }
 
@@ -192,12 +233,13 @@ export class AgentRegistry {
       tag1,
       tag2,
     );
-    const [count, summaryValue, summaryValueDecimals] = (await this._cfg.publicClient.readContract({
-      address: this._cfg.reputationRegistryAddress,
-      abi: REPUTATION_REGISTRY_ABI,
-      functionName: "getSummary",
-      args: [agentId, clientAddresses, tag1, tag2],
-    })) as [bigint, bigint, number];
+    const [count, summaryValue, summaryValueDecimals] =
+      (await this._cfg.publicClient.readContract({
+        address: this._cfg.reputationRegistryAddress,
+        abi: REPUTATION_REGISTRY_ABI,
+        functionName: "getSummary",
+        args: [agentId, clientAddresses, tag1, tag2],
+      })) as [bigint, bigint, number];
 
     logReputation(
       "getReputationSummary agentId=%s count=%s summaryValue=%s",
@@ -227,7 +269,14 @@ export class AgentRegistry {
       agentId.toString(),
       response,
     );
-    return { validatorAddress, agentId, response, responseHash, tag, lastUpdate };
+    return {
+      validatorAddress,
+      agentId,
+      response,
+      responseHash,
+      tag,
+      lastUpdate,
+    };
   }
 
   /**
@@ -242,12 +291,14 @@ export class AgentRegistry {
     validatorAddresses: Address[] = [],
     tag = "",
   ): Promise<ValidationSummary> {
-    const [count, averageResponse] = (await this._cfg.publicClient.readContract({
-      address: this._cfg.validationRegistryAddress,
-      abi: VALIDATION_REGISTRY_ABI,
-      functionName: "getSummary",
-      args: [agentId, validatorAddresses, tag],
-    })) as [bigint, number];
+    const [count, averageResponse] = (await this._cfg.publicClient.readContract(
+      {
+        address: this._cfg.validationRegistryAddress,
+        abi: VALIDATION_REGISTRY_ABI,
+        functionName: "getSummary",
+        args: [agentId, validatorAddresses, tag],
+      },
+    )) as [bigint, number];
 
     return { count, averageResponse };
   }

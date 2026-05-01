@@ -29,7 +29,6 @@
   "dependencies": {
     "@0glabs/0g-serving-broker": "^0.7.8",
     "@open-agents-toolkit/core": "*",
-    "debug": "^4.4.3",
     "ethers": "6.13.1"
   }
 }

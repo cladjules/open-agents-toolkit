@@ -22,14 +22,23 @@ import "./interfaces/IAgentRegistry.sol";
  *   - Holders of DEFAULT_ADMIN_ROLE can mint without paying the mint fee.
  *   - URI priority: custom per-token → baseURI+id → first dataDescription.
  */
-contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausable, ERC721, EIP712 {
+contract AgentRegistry is
+    IAgentRegistry,
+    AccessControl,
+    ReentrancyGuard,
+    Pausable,
+    ERC721,
+    EIP712
+{
     // ─── Roles ────────────────────────────────────────────────────────────────
     // Only DEFAULT_ADMIN_ROLE (from AccessControl) is used.
 
     // ─── ERC-8004 ─────────────────────────────────────────────────────────────
 
     bytes32 private constant SET_AGENT_WALLET_TYPEHASH =
-        keccak256("SetAgentWallet(uint256 agentId,address newWallet,uint256 deadline)");
+        keccak256(
+            "SetAgentWallet(uint256 agentId,address newWallet,uint256 deadline)"
+        );
 
     // ─── Storage ──────────────────────────────────────────────────────────────
 
@@ -89,14 +98,19 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         return _verifier;
     }
 
-    function setVerifier(address newVerifier) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setVerifier(
+        address newVerifier
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newVerifier != address(0), "Zero address");
         address oldVerifier = address(_verifier);
         _verifier = IAgentDataVerifier(newVerifier);
         emit VerifierUpdated(oldVerifier, newVerifier);
     }
 
-    function setRelayer(address relayer, bool authorized) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setRelayer(
+        address relayer,
+        bool authorized
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         isRelayer[relayer] = authorized;
     }
 
@@ -114,7 +128,14 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         string calldata publicMetadataUri,
         string calldata metadataUri,
         IntelligentData[] calldata newDatas
-    ) external payable override nonReentrant whenNotPaused returns (uint256 tokenId) {
+    )
+        external
+        payable
+        override
+        nonReentrant
+        whenNotPaused
+        returns (uint256 tokenId)
+    {
         require(to != address(0), "Zero address recipient");
 
         bool privileged = hasRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -147,7 +168,9 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
 
         // Refund any excess payment
         if (!privileged && msg.value > mintFee) {
-            (bool ok, ) = payable(msg.sender).call{ value: msg.value - mintFee }("");
+            (bool ok, ) = payable(msg.sender).call{value: msg.value - mintFee}(
+                ""
+            );
             require(ok, "Refund failed");
         }
 
@@ -170,12 +193,18 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
 
         address from = ownerOf(tokenId);
         IntelligentData[] storage datas = _intelligentDataOf[tokenId];
-        require(newDataHashes.length == datas.length, "Invalid data hash count");
+        require(
+            newDataHashes.length == datas.length,
+            "Invalid data hash count"
+        );
 
         // If there is encrypted data, TEE proof verification is mandatory.
         if (datas.length > 0) {
             // Only owner or authorized relayer (e.g. ENSAgentRegistry) can transfer with proof
-            require(msg.sender == from || isRelayer[msg.sender], "Not authorized");
+            require(
+                msg.sender == from || isRelayer[msg.sender],
+                "Not authorized"
+            );
 
             address tv = address(_verifier);
             require(tv != address(0), "No verifier configured");
@@ -185,16 +214,28 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
                 oldDataHashes[i] = datas[i].dataHash;
             }
 
-            TransferValidityProof[] memory proofs = abi.decode(proof, (TransferValidityProof[]));
-            TransferValidityProofOutput[] memory outputs = IAgentDataVerifier(tv).verifyTransferValidity(proofs);
+            TransferValidityProof[] memory proofs = abi.decode(
+                proof,
+                (TransferValidityProof[])
+            );
+            TransferValidityProofOutput[] memory outputs = IAgentDataVerifier(
+                tv
+            ).verifyTransferValidity(proofs);
             require(outputs.length == datas.length, "Proof count mismatch");
 
             bytes[] memory sealedKeys = new bytes[](outputs.length);
             for (uint256 i = 0; i < outputs.length; i++) {
-                require(outputs[i].oldDataHash == datas[i].dataHash, "Old data hash mismatch");
-                require(outputs[i].newDataHash == newDataHashes[i], "New data hash mismatch");
                 require(
-                    outputs[i].accessAssistant == to || outputs[i].accessAssistant == from,
+                    outputs[i].oldDataHash == datas[i].dataHash,
+                    "Old data hash mismatch"
+                );
+                require(
+                    outputs[i].newDataHash == newDataHashes[i],
+                    "New data hash mismatch"
+                );
+                require(
+                    outputs[i].accessAssistant == to ||
+                        outputs[i].accessAssistant == from,
                     "Access assistant mismatch"
                 );
                 sealedKeys[i] = outputs[i].sealedKey;
@@ -220,23 +261,33 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
 
     // ─── Data Accessors ───────────────────────────────────────────────────────
 
-    function intelligentDataOf(uint256 tokenId) external view override returns (IntelligentData[] memory) {
+    function intelligentDataOf(
+        uint256 tokenId
+    ) external view override returns (IntelligentData[] memory) {
         _requireOwned(tokenId);
         return _intelligentDataOf[tokenId];
     }
 
-    function tokenVerifier(uint256 tokenId) external view override returns (address) {
+    function tokenVerifier(
+        uint256 tokenId
+    ) external view override returns (address) {
         return _tokenVerifier[tokenId];
     }
 
-    function updateIntelligentData(uint256 tokenId, IntelligentData[] calldata newDatas) external whenNotPaused {
+    function updateIntelligentData(
+        uint256 tokenId,
+        IntelligentData[] calldata newDatas
+    ) external whenNotPaused {
         require(ownerOf(tokenId) == msg.sender, "Not owner");
         require(newDatas.length > 0, "Empty data array");
         _setIntelligentData(tokenId, newDatas);
     }
 
     /// @dev Internal helper to set intelligent data without ownership checks.
-    function _setIntelligentData(uint256 tokenId, IntelligentData[] calldata newDatas) internal {
+    function _setIntelligentData(
+        uint256 tokenId,
+        IntelligentData[] calldata newDatas
+    ) internal {
         delete _intelligentDataOf[tokenId];
         for (uint256 i = 0; i < newDatas.length; i++) {
             _intelligentDataOf[tokenId].push(newDatas[i]);
@@ -244,14 +295,18 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         emit IntelligentDataSet(tokenId, _intelligentDataOf[tokenId]);
     }
 
-    function getMetadataUri(uint256 tokenId) external view override returns (string memory) {
+    function getMetadataUri(
+        uint256 tokenId
+    ) external view override returns (string memory) {
         _requireOwned(tokenId);
         return _metadataUri[tokenId];
     }
 
     // ─── URI ──────────────────────────────────────────────────────────────────
 
-    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+    function tokenURI(
+        uint256 tokenId
+    ) public view override returns (string memory) {
         _requireOwned(tokenId);
 
         string memory custom = _customURIs[tokenId];
@@ -269,16 +324,30 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         return "";
     }
 
-    function setBaseURI(string calldata newBaseURI) external override onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setBaseURI(
+        string calldata newBaseURI
+    ) external override onlyRole(DEFAULT_ADMIN_ROLE) {
         string memory old = baseURI;
         baseURI = newBaseURI;
         emit BaseURIUpdated(old, newBaseURI);
     }
 
-    function setTokenURI(uint256 tokenId, string calldata newURI) external override {
+    function setTokenURI(
+        uint256 tokenId,
+        string calldata newURI
+    ) external override {
         require(ownerOf(tokenId) == msg.sender, "Not owner");
         _customURIs[tokenId] = newURI;
         emit TokenURIUpdated(tokenId, newURI);
+    }
+
+    function setMetadataURI(
+        uint256 tokenId,
+        string calldata newURI
+    ) external override {
+        require(ownerOf(tokenId) == msg.sender, "Not owner");
+        _metadataUri[tokenId] = newURI;
+        emit MetadataURIUpdated(tokenId, newURI);
     }
 
     // ─── Creator ──────────────────────────────────────────────────────────────
@@ -287,7 +356,10 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         return creators[tokenId];
     }
 
-    function setCreator(uint256 tokenId, address creator) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setCreator(
+        uint256 tokenId,
+        address creator
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         _requireOwned(tokenId);
         creators[tokenId] = creator;
         emit CreatorSet(tokenId, creator);
@@ -299,7 +371,9 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         return mintFee;
     }
 
-    function setMintFee(uint256 newMintFee) external override onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setMintFee(
+        uint256 newMintFee
+    ) external override onlyRole(DEFAULT_ADMIN_ROLE) {
         uint256 old = mintFee;
         mintFee = newMintFee;
         emit MintFeeUpdated(old, newMintFee);
@@ -317,7 +391,9 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
 
     // ─── ERC-8004: Agent Wallet ───────────────────────────────────────────────
 
-    function getAgentWallet(uint256 agentId) external view override returns (address) {
+    function getAgentWallet(
+        uint256 agentId
+    ) external view override returns (address) {
         return _agentWallet[agentId];
     }
 
@@ -330,7 +406,9 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         require(ownerOf(agentId) == msg.sender, "Not owner");
         require(newWallet != address(0), "Zero address");
         require(block.timestamp <= deadline, "Signature expired");
-        bytes32 structHash = keccak256(abi.encode(SET_AGENT_WALLET_TYPEHASH, agentId, newWallet, deadline));
+        bytes32 structHash = keccak256(
+            abi.encode(SET_AGENT_WALLET_TYPEHASH, agentId, newWallet, deadline)
+        );
         address signer = ECDSA.recover(_hashTypedDataV4(structHash), signature);
         require(signer == newWallet, "Invalid wallet signature");
         _agentWallet[agentId] = newWallet;
@@ -350,7 +428,11 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
     }
 
     /// @dev Clear agentWallet on transfer (ERC-8004 requirement).
-    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
+    function _update(
+        address to,
+        uint256 tokenId,
+        address auth
+    ) internal override returns (address) {
         address from = super._update(to, tokenId, auth);
         // ERC-8004: clear verified wallet on transfer so new owner must re-verify
         if (from != address(0) && to != address(0)) {
@@ -360,7 +442,9 @@ contract AgentRegistry is IAgentRegistry, AccessControl, ReentrancyGuard, Pausab
         return from;
     }
 
-    function supportsInterface(bytes4 interfaceId) public view override(ERC721, AccessControl, IERC165) returns (bool) {
+    function supportsInterface(
+        bytes4 interfaceId
+    ) public view override(ERC721, AccessControl, IERC165) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
 }

@@ -7,27 +7,45 @@ import { useWallet } from "@/components/wallet/WalletProvider";
 type Props = {
   agentId: string;
   owner: string;
-  entries: Array<{ dataDescription: string; dataHash: `0x${string}` }>;
+  entries: Array<{
+    name?: string;
+    dataDescription: string;
+    dataHash: `0x${string}`;
+  }>;
 };
 
 type DecryptedEntry = {
+  name?: string;
   dataDescription: string;
   dataHash: `0x${string}`;
   plaintext?: unknown;
   error?: string;
 };
 
-function buildDecryptMessage(agentId: string, ownerAddress: string, signedAt: number) {
+function buildDecryptMessage(
+  agentId: string,
+  ownerAddress: string,
+  signedAt: number,
+) {
   return `Open Agents Toolkit decrypt request\nagentId:${agentId}\nowner:${ownerAddress.toLowerCase()}\nsignedAt:${signedAt}`;
 }
 
-export default function OwnerIntelligentDataDecrypt({ agentId, owner, entries }: Props) {
+export default function OwnerIntelligentDataDecrypt({
+  agentId,
+  owner,
+  entries,
+}: Props) {
   const { address, getViemClients } = useWallet();
-  const [result, setResult] = useState<{ data: DecryptedEntry[]; error?: string } | null>(null);
+  const [result, setResult] = useState<{
+    data: DecryptedEntry[];
+    error?: string;
+  } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const isOwner = !!address && address.toLowerCase() === owner.toLowerCase();
-  const decryptedByHash = new Map((result?.data ?? []).map((entry) => [entry.dataHash.toLowerCase(), entry]));
+  const decryptedByHash = new Map(
+    (result?.data ?? []).map((entry) => [entry.dataHash.toLowerCase(), entry]),
+  );
 
   return (
     <div className="space-y-3">
@@ -55,7 +73,10 @@ export default function OwnerIntelligentDataDecrypt({ agentId, owner, entries }:
               } catch (error) {
                 setResult({
                   data: [],
-                  error: error instanceof Error ? error.message : "Failed to decrypt intelligent data.",
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : "Failed to decrypt intelligent data.",
                 });
               }
             });
@@ -74,27 +95,39 @@ export default function OwnerIntelligentDataDecrypt({ agentId, owner, entries }:
 
       {address && !isOwner && (
         <p className="text-xs text-gray-500">
-          Only the current owner can decrypt and view intelligent data plaintext.
+          Only the current owner can decrypt and view intelligent data
+          plaintext.
         </p>
       )}
 
       {result?.error && (
-        <p className="text-xs text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">{result.error}</p>
+        <p className="text-xs text-red-400 bg-red-950/40 px-3 py-2 rounded-lg">
+          {result.error}
+        </p>
       )}
 
       <div className="space-y-3">
         {entries.map((entry, idx) => {
           const decrypted = decryptedByHash.get(entry.dataHash.toLowerCase());
+          const entryName =
+            decrypted?.name || entry.name || `Entry #${idx + 1}`;
 
           return (
-            <div key={`${entry.dataHash}:${idx}`} className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-2">
+            <div
+              key={`${entry.dataHash}:${idx}`}
+              className="rounded-lg border border-gray-800 bg-gray-950/40 p-4 space-y-2"
+            >
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-gray-500">Entry #{idx + 1}</span>
+                <span className="text-xs text-gray-500">{entryName}</span>
               </div>
               <p className="text-xs text-gray-500">Proof Hash</p>
-              <p className="text-xs text-gray-300 break-all font-mono">{entry.dataHash}</p>
+              <p className="text-xs text-gray-300 break-all font-mono">
+                {entry.dataHash}
+              </p>
               <p className="text-xs text-gray-500">Address / URI</p>
-              <p className="text-xs text-gray-300 break-all font-mono">{entry.dataDescription}</p>
+              <p className="text-xs text-gray-300 break-all font-mono">
+                {entry.dataDescription}
+              </p>
 
               {decrypted && (
                 <>

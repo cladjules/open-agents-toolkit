@@ -9,6 +9,9 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Open Agents Toolkit — Dashboard",
   description: "Deploy, browse, and manage on-chain AI agents (ERC-7857 · ERC-8004).",
+  icons: {
+    icon: "/favicon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

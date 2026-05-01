@@ -60,9 +60,16 @@
 
 import { createZGComputeNetworkBroker } from "@0glabs/0g-serving-broker";
 import { ethers } from "ethers";
-import { getNetworkConfig, resolveNetworkConfig } from "@open-agents-toolkit/core";
+import {
+  getNetworkConfig,
+  resolveNetworkConfig,
+} from "@open-agents-toolkit/core";
 import type { NetworkId } from "@open-agents-toolkit/core";
-import createDebug from "debug";
+
+const createDebug =
+  (namespace: string) =>
+  (...args: unknown[]) =>
+    console.log(`[${namespace}]`, ...args);
 
 const log = createDebug("oat:compute");
 
@@ -149,7 +156,9 @@ export class ZeroGComputeClient {
   private _broker: Broker | undefined;
 
   constructor(opts: ZeroGComputeClientOptions) {
-    const networkCfg = opts.network ? getNetworkConfig(opts.network) : resolveNetworkConfig();
+    const networkCfg = opts.network
+      ? getNetworkConfig(opts.network)
+      : resolveNetworkConfig();
 
     if (!networkCfg.zeroG) {
       throw new Error(
@@ -199,7 +208,9 @@ export class ZeroGComputeClient {
     await broker.ledger.depositFund(initialFunds);
 
     if (this._oracleProviderAddress) {
-      await broker.inference.acknowledgeProviderSigner(this._oracleProviderAddress);
+      await broker.inference.acknowledgeProviderSigner(
+        this._oracleProviderAddress,
+      );
       await broker.ledger.transferFund(
         this._oracleProviderAddress,
         "inference",
@@ -221,9 +232,13 @@ export class ZeroGComputeClient {
    *  - Pass `result.newDataHashes`, `result.sealedKey`, and `result.proof` to
    *    `AgentNFTClient.transfer(tokenId, newOwner, result.newDataHashes, result.sealedKey, result.proof)`.
    */
-  async requestReEncryption(req: ReEncryptionRequest): Promise<ReEncryptionResult> {
+  async requestReEncryption(
+    req: ReEncryptionRequest,
+  ): Promise<ReEncryptionResult> {
     if (!this._oracleProviderAddress) {
-      throw new Error("oracleProviderAddress is required for re-encryption requests.");
+      throw new Error(
+        "oracleProviderAddress is required for re-encryption requests.",
+      );
     }
 
     const broker = await this._broker_();
@@ -241,7 +256,10 @@ export class ZeroGComputeClient {
       newOwnerPublicKey: req.newOwnerPublicKey,
     });
 
-    const headers = await broker.inference.getRequestHeaders(this._oracleProviderAddress, payload);
+    const headers = await broker.inference.getRequestHeaders(
+      this._oracleProviderAddress,
+      payload,
+    );
 
     const response = await fetch(`${endpoint}/chat/completions`, {
       method: "POST",
@@ -253,7 +271,9 @@ export class ZeroGComputeClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Re-encryption request failed: ${response.status} ${await response.text()}`);
+      throw new Error(
+        `Re-encryption request failed: ${response.status} ${await response.text()}`,
+      );
     }
 
     const result = (await response.json()) as {
@@ -266,7 +286,11 @@ export class ZeroGComputeClient {
     }
 
     // Settle payment + TEE verification
-    await broker.inference.processResponse(this._oracleProviderAddress, result.id, content);
+    await broker.inference.processResponse(
+      this._oracleProviderAddress,
+      result.id,
+      content,
+    );
 
     const parsed = JSON.parse(content) as {
       newDataHashes: string[];
@@ -291,10 +315,18 @@ export class ZeroGComputeClient {
    */
   async inference(req: InferenceRequest): Promise<InferenceResult> {
     const broker = await this._broker_();
-    const { endpoint, model } = await broker.inference.getServiceMetadata(req.providerAddress);
+    const { endpoint, model } = await broker.inference.getServiceMetadata(
+      req.providerAddress,
+    );
 
-    const body = JSON.stringify({ role: "user", content: req.messages.at(-1)?.content ?? "" });
-    const headers = await broker.inference.getRequestHeaders(req.providerAddress, body);
+    const body = JSON.stringify({
+      role: "user",
+      content: req.messages.at(-1)?.content ?? "",
+    });
+    const headers = await broker.inference.getRequestHeaders(
+      req.providerAddress,
+      body,
+    );
 
     const response = await fetch(`${endpoint}/chat/completions`, {
       method: "POST",
@@ -303,7 +335,9 @@ export class ZeroGComputeClient {
     });
 
     if (!response.ok) {
-      throw new Error(`Inference request failed: ${response.status} ${await response.text()}`);
+      throw new Error(
+        `Inference request failed: ${response.status} ${await response.text()}`,
+      );
     }
 
     const result = (await response.json()) as {
@@ -312,7 +346,11 @@ export class ZeroGComputeClient {
     };
     const content = result.choices[0]?.message?.content ?? "";
 
-    const isValid = await broker.inference.processResponse(req.providerAddress, result.id, content);
+    const isValid = await broker.inference.processResponse(
+      req.providerAddress,
+      result.id,
+      content,
+    );
 
     return { content, isValid: !!isValid, provider: req.providerAddress };
   }

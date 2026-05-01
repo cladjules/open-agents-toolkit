@@ -1,10 +1,17 @@
-import type { AgentIdentity, AgentRegistrationFile } from "@open-agents-toolkit/core";
+import type {
+  AgentIdentity,
+  AgentRegistrationFile,
+} from "@open-agents-toolkit/core";
 
 interface AgentCardProps {
   agent: AgentIdentity & { metadata: AgentRegistrationFile };
 }
 
 export default function AgentCard({ agent }: AgentCardProps) {
+  const ensDomain =
+    agent.metadata.services?.find((service) => service.name === "ENS")
+      ?.endpoint ?? agent.metadata.name;
+
   return (
     <a
       href={`/agents/${agent.agentId.toString()}`}
@@ -12,8 +19,12 @@ export default function AgentCard({ agent }: AgentCardProps) {
     >
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="font-semibold text-white truncate max-w-[200px]">{agent.metadata.name}</h3>
-          <p className="text-xs text-gray-500 font-mono mt-0.5">#{agent.agentId.toString()}</p>
+          <h3 className="font-semibold text-white truncate max-w-[200px]">
+            {ensDomain}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[200px]">
+            {agent.metadata.name} #{agent.agentId.toString()}
+          </p>
         </div>
         {agent.metadata.image && (
           // eslint-disable-next-line @next/next/no-img-element
@@ -25,7 +36,9 @@ export default function AgentCard({ agent }: AgentCardProps) {
         )}
       </div>
 
-      <p className="text-sm text-gray-400 line-clamp-2">{agent.metadata.description}</p>
+      <p className="text-sm text-gray-400 line-clamp-2">
+        {agent.metadata.description}
+      </p>
 
       <div className="flex flex-wrap gap-1.5">
         {(agent.metadata.services ?? []).slice(0, 3).map((service) => (

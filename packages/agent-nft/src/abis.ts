@@ -74,6 +74,7 @@ export const AGENT_REGISTRY_ABI = [
   {"inputs":[{"internalType":"address","name":"operator","type":"address"},{"internalType":"bool","name":"approved","type":"bool"}],"name":"setApprovalForAll","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"string","name":"newBaseURI","type":"string"}],"name":"setBaseURI","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"address","name":"creator","type":"address"}],"name":"setCreator","outputs":[],"stateMutability":"nonpayable","type":"function"},
+  {"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"string","name":"newURI","type":"string"}],"name":"setMetadataURI","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"uint256","name":"newMintFee","type":"uint256"}],"name":"setMintFee","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"address","name":"relayer","type":"address"},{"internalType":"bool","name":"authorized","type":"bool"}],"name":"setRelayer","outputs":[],"stateMutability":"nonpayable","type":"function"},
   {"inputs":[{"internalType":"uint256","name":"tokenId","type":"uint256"},{"internalType":"string","name":"newURI","type":"string"}],"name":"setTokenURI","outputs":[],"stateMutability":"nonpayable","type":"function"},

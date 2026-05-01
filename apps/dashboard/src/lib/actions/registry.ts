@@ -1,6 +1,9 @@
 "use server";
 
-import type { AgentIdentity, AgentRegistrationFile } from "@open-agents-toolkit/core";
+import type {
+  AgentIdentity,
+  AgentRegistrationFile,
+} from "@open-agents-toolkit/core";
 import {
   AgentRegistry,
   ZeroGStorageClient,
@@ -22,9 +25,12 @@ import { cfg } from "@/lib/config";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type RegisteredAgent = AgentIdentity & { metadata: AgentRegistrationFile };
+export type RegisteredAgent = AgentIdentity & {
+  metadata: AgentRegistrationFile;
+};
 
 export type AgentIntelligentDataEntry = {
+  name?: string;
   dataDescription: string;
   dataHash: `0x${string}`;
 };
@@ -50,6 +56,7 @@ export type AgentFeedbackOverview = {
 };
 
 export type DecryptedIntelligentDataEntry = {
+  name?: string;
   dataDescription: string;
   dataHash: `0x${string}`;
   plaintext?: unknown;
@@ -87,12 +94,19 @@ type FeedbackPayload = {
 };
 
 function isReadableUri(value: string) {
-  return value.startsWith("zerog://") || value.startsWith("http://") || value.startsWith("https://");
+  return (
+    value.startsWith("zerog://") ||
+    value.startsWith("http://") ||
+    value.startsWith("https://")
+  );
 }
 
 function makePublicClient() {
   if (!cfg.rpcUrl) return null;
-  return createPublicClient({ chain: cfg.chain, transport: http(cfg.rpcUrl) });
+  return createPublicClient({
+    chain: cfg.chain as any,
+    transport: http(cfg.rpcUrl),
+  });
 }
 
 function makeAgentRegistryClient() {
@@ -104,7 +118,7 @@ function makeAgentRegistryClient() {
     agentRegistryAddress: cfg.registryAddress,
     reputationRegistryAddress: cfg.reputationAddress ?? cfg.registryAddress,
     validationRegistryAddress: cfg.validationAddress ?? cfg.registryAddress,
-    publicClient,
+    publicClient: publicClient as any,
     zeroG: { rpcUrl: cfg.rpcUrl },
   });
 }
@@ -136,7 +150,10 @@ function getFormValue(formData: FormData, key: string) {
   return (formData.get(key) as string | null)?.trim() ?? "";
 }
 
-function parseJsonString(value: string, invalidMessage: string): { data?: unknown; error?: string } {
+function parseJsonString(
+  value: string,
+  invalidMessage: string,
+): { data?: unknown; error?: string } {
   try {
     return { data: JSON.parse(value) };
   } catch {
@@ -160,17 +177,30 @@ async function parseFeedbackInput(
   return { error: "Provide feedback JSON text or upload a .json file." };
 }
 
-async function uploadFeedbackPayload(payload: FeedbackPayload): Promise<{ uri?: string; error?: string }> {
+async function uploadFeedbackPayload(
+  payload: FeedbackPayload,
+): Promise<{ uri?: string; error?: string }> {
   if (!cfg.zeroGKey || !cfg.rpcUrl) {
-    return { error: "0G storage is required for feedback. Configure PRIVATE_KEY and RPC." };
+    return {
+      error:
+        "0G storage is required for feedback. Configure PRIVATE_KEY and RPC.",
+    };
   }
 
   try {
-    const storage = new ZeroGStorageClient({ privateKey: cfg.zeroGKey, rpcUrl: cfg.rpcUrl });
+    const storage = new ZeroGStorageClient({
+      privateKey: cfg.zeroGKey,
+      rpcUrl: cfg.rpcUrl,
+    });
     const upload = await storage.uploadJSON(payload);
     return { uri: upload.url };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Uploading feedback JSON to 0G failed." };
+    return {
+      error:
+        err instanceof Error
+          ? err.message
+          : "Uploading feedback JSON to 0G failed.",
+    };
   }
 }
 
@@ -248,10 +278,12 @@ export async function getRegisteredAgents(): Promise<RegisteredAgent[]> {
       logs.map((log) => registry.resolve(log.args.agentId as bigint)),
     );
     return agents
-      .filter((r): r is PromiseFulfilledResult<RegisteredAgent> => r.status === "fulfilled")
+      .filter(
+        (r): r is PromiseFulfilledResult<RegisteredAgent> =>
+          r.status === "fulfilled",
+      )
       .map((r) => r.value)
       .reverse();
-
   } catch {
     return [];
   }
@@ -270,9 +302,10 @@ export async function getAgent(id: bigint): Promise<RegisteredAgent | null> {
   }
 }
 
-export async function getAgentIntelligentData(
-  agentId: bigint,
-): Promise<{ verifierAddress?: `0x${string}`; intelligentData: AgentIntelligentDataEntry[] }> {
+export async function getAgentIntelligentData(agentId: bigint): Promise<{
+  verifierAddress?: `0x${string}`;
+  intelligentData: AgentIntelligentDataEntry[];
+}> {
   if (!cfg.registryAddress) {
     return { intelligentData: [] };
   }
@@ -299,12 +332,17 @@ export async function getAgentIntelligentData(
     ]);
 
     const uriByHash = await readPublicMetadataIntelligentDataMap(agentId);
-    const intelligentData = (rawData as ReadonlyArray<AgentIntelligentDataRecord>).map((entry) => {
+    const intelligentData = (
+      rawData as ReadonlyArray<AgentIntelligentDataRecord>
+    ).map((entry) => {
       const mapped = uriByHash.get(entry.dataHash.toLowerCase());
       const resolvedDescription =
-        isReadableUri(entry.dataDescription) || !mapped?.uri ? entry.dataDescription : mapped.uri;
+        isReadableUri(entry.dataDescription) || !mapped?.uri
+          ? entry.dataDescription
+          : mapped.uri;
 
       return {
+        name: mapped?.name,
         dataDescription: resolvedDescription,
         dataHash: entry.dataHash,
       };
@@ -319,13 +357,16 @@ export async function getAgentIntelligentData(
   }
 }
 
-export async function getAgentFeedbackOverview(agentId: bigint): Promise<AgentFeedbackOverview> {
+export async function getAgentFeedbackOverview(
+  agentId: bigint,
+): Promise<AgentFeedbackOverview> {
   if (!cfg.registryAddress || !cfg.reputationAddress) {
     return { totalScore: 0, totalCount: 0, feedbacks: [] };
   }
 
   try {
     const publicClient = makePublicClient();
+
     if (!publicClient) {
       return { totalScore: 0, totalCount: 0, feedbacks: [] };
     }
@@ -334,12 +375,12 @@ export async function getAgentFeedbackOverview(agentId: bigint): Promise<AgentFe
       agentRegistryAddress: cfg.registryAddress,
       reputationRegistryAddress: cfg.reputationAddress,
       validationRegistryAddress: cfg.validationAddress ?? cfg.registryAddress,
-      publicClient,
+      publicClient: publicClient as any,
       zeroG: { rpcUrl: cfg.rpcUrl },
     });
 
     const [feedbacks, clients, feedbackLogs] = await Promise.all([
-      registry.getFeedback(agentId, [], "", "", true),
+      registry.getAllFeedbacks(agentId),
       registry.getClients(agentId),
       publicClient.getLogs({
         address: cfg.reputationAddress,
@@ -374,14 +415,17 @@ export async function getAgentFeedbackOverview(agentId: bigint): Promise<AgentFe
     let totalScore = 0;
     if (clients.length > 0) {
       const summary = await registry.getReputationSummary(agentId, clients);
-      totalScore = Number(summary.summaryValue) / Math.pow(10, summary.summaryValueDecimals);
+      totalScore =
+        Number(summary.summaryValue) /
+        Math.pow(10, summary.summaryValueDecimals);
     }
 
     const feedbackViews: AgentFeedbackView[] = feedbacks
       .map((feedback) => {
         const key = `${feedback.client.toLowerCase()}:${feedback.feedbackIndex.toString()}`;
         const extra = detailsByFeedback.get(key);
-        const normalizedValue = Number(feedback.value) / Math.pow(10, feedback.valueDecimals);
+        const normalizedValue =
+          Number(feedback.value) / Math.pow(10, feedback.valueDecimals);
 
         return {
           client: feedback.client,
@@ -422,7 +466,10 @@ export async function decryptAgentIntelligentData(
   const { agentId, ownerAddress, signedAt, signature } = input;
   const ageMs = Date.now() - Number(signedAt);
   if (!Number.isFinite(ageMs) || ageMs < -60_000 || ageMs > 5 * 60_000) {
-    return { data: [], error: "Decryption signature is expired. Please try again." };
+    return {
+      data: [],
+      error: "Decryption signature is expired. Please try again.",
+    };
   }
 
   try {
@@ -459,18 +506,21 @@ export async function decryptAgentIntelligentData(
     ]);
 
     if ((chainOwner as string).toLowerCase() !== ownerAddress.toLowerCase()) {
-      return { data: [], error: "Only the current owner can decrypt intelligent data." };
+      return {
+        data: [],
+        error: "Only the current owner can decrypt intelligent data.",
+      };
     }
 
     const entries = onChainData as ReadonlyArray<AgentIntelligentDataRecord>;
     const uriByHash = await readPublicMetadataIntelligentDataMap(tokenId);
     const decrypted = await Promise.all(
       entries.map(async (entry): Promise<DecryptedIntelligentDataEntry> => {
+        const mapped = uriByHash.get(entry.dataHash.toLowerCase());
         try {
-          const mapped = uriByHash.get(entry.dataHash.toLowerCase());
           const uri = isReadableUri(entry.dataDescription)
             ? entry.dataDescription
-            : mapped?.uri ?? "";
+            : (mapped?.uri ?? "");
 
           if (!uri || !isReadableUri(uri)) {
             throw new Error(
@@ -479,18 +529,26 @@ export async function decryptAgentIntelligentData(
           }
 
           const blob = await readJsonFromUri<Record<string, unknown>>(uri);
-          const plaintext = decryptEncryptedBlob(blob, cfg.oracleKey as `0x${string}`);
+          const plaintext = decryptEncryptedBlob(
+            blob,
+            cfg.oracleKey as `0x${string}`,
+          );
 
           return {
+            name: mapped?.name,
             dataDescription: entry.dataDescription,
             dataHash: entry.dataHash,
             plaintext,
           };
         } catch (error) {
           return {
+            name: mapped?.name,
             dataDescription: entry.dataDescription,
             dataHash: entry.dataHash,
-            error: error instanceof Error ? error.message : "Failed to decrypt intelligent data.",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to decrypt intelligent data.",
           };
         }
       }),
@@ -500,7 +558,10 @@ export async function decryptAgentIntelligentData(
   } catch (error) {
     return {
       data: [],
-      error: error instanceof Error ? error.message : "Failed to decrypt intelligent data.",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Failed to decrypt intelligent data.",
     };
   }
 }
@@ -554,7 +615,10 @@ export async function prepareFeedback(
       feedbackURI: uploaded.uri,
     };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Feedback preparation failed." };
+    return {
+      error:
+        err instanceof Error ? err.message : "Feedback preparation failed.",
+    };
   }
 }
 
@@ -562,7 +626,9 @@ export async function prepareValidation(
   formData: FormData,
 ): Promise<PreparedValidationResult> {
   const agentId = getFormValue(formData, "agentId");
-  const validatorAddress = getFormValue(formData, "validatorAddress") as `0x${string}` | "";
+  const validatorAddress = getFormValue(formData, "validatorAddress") as
+    | `0x${string}`
+    | "";
   const requestURI = getFormValue(formData, "requestURI");
 
   if (!agentId) return { error: "Agent ID is required." };
@@ -573,7 +639,9 @@ export async function prepareValidation(
   }
 
   try {
-    const requestHash = keccak256(toHex(`${agentId}:${validatorAddress}:${requestURI}:${Date.now()}`));
+    const requestHash = keccak256(
+      toHex(`${agentId}:${validatorAddress}:${requestURI}:${Date.now()}`),
+    );
     return {
       contractAddress: cfg.validationAddress,
       agentId,
@@ -582,9 +650,11 @@ export async function prepareValidation(
       requestHash,
     };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Validation request preparation failed." };
+    return {
+      error:
+        err instanceof Error
+          ? err.message
+          : "Validation request preparation failed.",
+    };
   }
 }
-
-
-

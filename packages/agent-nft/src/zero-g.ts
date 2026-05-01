@@ -11,10 +11,18 @@
 
 import { Indexer, MemData } from "@0gfoundation/0g-ts-sdk";
 import { ethers } from "ethers";
-import { RegistryError, getNetworkConfig, resolveNetworkConfig } from "@open-agents-toolkit/core";
+import {
+  RegistryError,
+  getNetworkConfig,
+  resolveNetworkConfig,
+} from "@open-agents-toolkit/core";
 import type { IPFSUploadResult } from "@open-agents-toolkit/core";
 import type { NetworkId } from "@open-agents-toolkit/core";
-import createDebug from "debug";
+
+const createDebug =
+  (namespace: string) =>
+  (...args: unknown[]) =>
+    console.log(`[${namespace}]`, ...args);
 
 const log = createDebug("oat:zero-g");
 const logUpload = createDebug("oat:zero-g:upload");
@@ -46,7 +54,9 @@ export interface ZeroGReadOptions {
 }
 
 function getIndexerUrl(opts?: ZeroGReadOptions): string {
-  const networkCfg = opts?.network ? getNetworkConfig(opts.network) : resolveNetworkConfig();
+  const networkCfg = opts?.network
+    ? getNetworkConfig(opts.network)
+    : resolveNetworkConfig();
 
   if (!networkCfg.zeroG) {
     throw new Error(
@@ -61,7 +71,10 @@ function getRootHashFromUrl(uri: string): string {
   return uri.startsWith("zerog://") ? uri.slice("zerog://".length) : uri;
 }
 
-export async function readZeroGBytes(uri: string, opts?: ZeroGReadOptions): Promise<Uint8Array> {
+export async function readZeroGBytes(
+  uri: string,
+  opts?: ZeroGReadOptions,
+): Promise<Uint8Array> {
   const rootHash = getRootHashFromUrl(uri);
   const indexer = new Indexer(getIndexerUrl(opts));
   const [blob, err] = await indexer.downloadToBlob(rootHash);
@@ -77,7 +90,10 @@ export async function readZeroGBytes(uri: string, opts?: ZeroGReadOptions): Prom
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-export async function readZeroGJSON<T>(uri: string, opts?: ZeroGReadOptions): Promise<T> {
+export async function readZeroGJSON<T>(
+  uri: string,
+  opts?: ZeroGReadOptions,
+): Promise<T> {
   const bytes = await readZeroGBytes(uri, opts);
 
   try {
@@ -97,7 +113,9 @@ export class ZeroGStorageClient {
   private readonly _privateKey: string;
 
   constructor(opts: ZeroGStorageOptions) {
-    const networkCfg = opts.network ? getNetworkConfig(opts.network) : resolveNetworkConfig();
+    const networkCfg = opts.network
+      ? getNetworkConfig(opts.network)
+      : resolveNetworkConfig();
 
     if (!networkCfg.zeroG) {
       throw new Error(
@@ -130,7 +148,11 @@ export class ZeroGStorageClient {
    * Upload raw bytes to 0G Storage.
    */
   async uploadBytes(bytes: Uint8Array): Promise<IPFSUploadResult> {
-    logUpload("uploadBytes size=%d bytes indexerUrl=%s", bytes.length, this._indexerUrl);
+    logUpload(
+      "uploadBytes size=%d bytes indexerUrl=%s",
+      bytes.length,
+      this._indexerUrl,
+    );
     try {
       const provider = new ethers.JsonRpcProvider(this._rpcUrl);
       const signer = new ethers.Wallet(this._privateKey, provider);
@@ -140,7 +162,11 @@ export class ZeroGStorageClient {
       logUpload("submitting to 0G Storage indexer...");
       // ethers v6 is runtime-compatible with the SDK's ethers v5 Signer interface.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const [tx, err] = await indexer.upload(memData, this._rpcUrl, signer as any);
+      const [tx, err] = await indexer.upload(
+        memData,
+        this._rpcUrl,
+        signer as any,
+      );
 
       if (err || !tx) {
         throw new Error(String(err ?? "no transaction returned"));
@@ -155,7 +181,11 @@ export class ZeroGStorageClient {
       return { cid: rootHash, url: `zerog://${rootHash}`, size: bytes.length };
     } catch (err) {
       log("upload failed: %s", String(err));
-      throw new RegistryError("STORAGE_ERROR", `0G Storage upload failed: ${String(err)}`, err);
+      throw new RegistryError(
+        "STORAGE_ERROR",
+        `0G Storage upload failed: ${String(err)}`,
+        err,
+      );
     }
   }
 

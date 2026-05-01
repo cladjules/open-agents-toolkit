@@ -11,12 +11,17 @@
  */
 import "dotenv/config";
 import { secp256k1 } from "@noble/curves/secp256k1";
-import { createPublicClient, createWalletClient, http, parseEventLogs, zeroAddress } from "viem";
+import {
+  createPublicClient,
+  createWalletClient,
+  http,
+  parseEventLogs,
+} from "viem";
 import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { AgentNFTClient } from "@open-agents-toolkit/agent-nft";
 import { signLocalOracleReEncryption } from "@open-agents-toolkit/compute";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -28,11 +33,9 @@ const RPC_URL = process.env.ZERO_G_RPC_URL ?? "https://evmrpc-testnet.0g.ai";
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}`;
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY not set in .env");
 
-const ORACLE_PRIVATE_KEY = process.env.ORACLE_PRIVATE_KEY as `0x${string}` | undefined;
-const KEY_ENCRYPTION_PRIVATE_KEY = ORACLE_PRIVATE_KEY ?? PRIVATE_KEY;
-const KEY_ENCRYPTION_PUBLIC_KEY = (
-  "0x" + Buffer.from(secp256k1.getPublicKey(KEY_ENCRYPTION_PRIVATE_KEY.slice(2), true)).toString("hex")
-) as `0x${string}`;
+const ORACLE_PRIVATE_KEY = process.env.ORACLE_PRIVATE_KEY as
+  | `0x${string}`
+  | undefined;
 
 const chain = {
   id: 16602,
@@ -42,35 +45,74 @@ const chain = {
 } as const;
 
 const deployedAddresses = JSON.parse(
-  readFileSync(resolve(__dirname, "../ignition/deployments/chain-16602/deployed_addresses.json"), "utf8")
+  readFileSync(
+    resolve(
+      __dirname,
+      "../ignition/deployments/chain-16602/deployed_addresses.json",
+    ),
+    "utf8",
+  ),
 );
 const AGENT_REGISTRY_ABI = JSON.parse(
-  readFileSync(resolve(__dirname, "../artifacts/src/AgentRegistry.sol/AgentRegistry.json"), "utf8")
+  readFileSync(
+    resolve(__dirname, "../artifacts/src/AgentRegistry.sol/AgentRegistry.json"),
+    "utf8",
+  ),
 ).abi;
 const REPUTATION_REGISTRY_ABI = JSON.parse(
-  readFileSync(resolve(__dirname, "../artifacts/src/ReputationRegistry.sol/ReputationRegistry.json"), "utf8")
+  readFileSync(
+    resolve(
+      __dirname,
+      "../artifacts/src/ReputationRegistry.sol/ReputationRegistry.json",
+    ),
+    "utf8",
+  ),
 ).abi;
 const VALIDATION_REGISTRY_ABI = JSON.parse(
-  readFileSync(resolve(__dirname, "../artifacts/src/ValidationRegistry.sol/ValidationRegistry.json"), "utf8")
+  readFileSync(
+    resolve(
+      __dirname,
+      "../artifacts/src/ValidationRegistry.sol/ValidationRegistry.json",
+    ),
+    "utf8",
+  ),
 ).abi;
 const TEE_VERIFIER_ABI = JSON.parse(
-  readFileSync(resolve(__dirname, "../artifacts/src/TEEVerifier.sol/TEEVerifier.json"), "utf8")
+  readFileSync(
+    resolve(__dirname, "../artifacts/src/TEEVerifier.sol/TEEVerifier.json"),
+    "utf8",
+  ),
 ).abi;
-const AGENT_REGISTRY_ADDRESS = deployedAddresses["OpenAgentsToolkit#AgentRegistry"] as `0x${string}`;
-const REPUTATION_REGISTRY_ADDRESS = deployedAddresses["OpenAgentsToolkit#ReputationRegistry"] as `0x${string}`;
-const VALIDATION_REGISTRY_ADDRESS = deployedAddresses["OpenAgentsToolkit#ValidationRegistry"] as `0x${string}`;
-const TEE_VERIFIER_ADDRESS = deployedAddresses["OpenAgentsToolkit#TEEVerifier"] as `0x${string}`;
+const AGENT_REGISTRY_ADDRESS = deployedAddresses[
+  "OpenAgentsToolkit#AgentRegistry"
+] as `0x${string}`;
+const REPUTATION_REGISTRY_ADDRESS = deployedAddresses[
+  "OpenAgentsToolkit#ReputationRegistry"
+] as `0x${string}`;
+const VALIDATION_REGISTRY_ADDRESS = deployedAddresses[
+  "OpenAgentsToolkit#ValidationRegistry"
+] as `0x${string}`;
+const TEE_VERIFIER_ADDRESS = deployedAddresses[
+  "OpenAgentsToolkit#TEEVerifier"
+] as `0x${string}`;
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
 const account = privateKeyToAccount(PRIVATE_KEY);
 const publicClient = createPublicClient({ chain, transport: http(RPC_URL) });
-const walletClient = createWalletClient({ account, chain, transport: http(RPC_URL) });
+const walletClient = createWalletClient({
+  account,
+  chain,
+  transport: http(RPC_URL),
+});
 
 const recipientPrivKey = generatePrivateKey();
 const recipientAccount = privateKeyToAccount(recipientPrivKey);
 const recipient = recipientAccount.address;
-const NEW_OWNER_PUBLIC_KEY = ("0x" + Buffer.from(secp256k1.getPublicKey(recipientPrivKey.slice(2), true)).toString("hex")) as `0x${string}`;
+const NEW_OWNER_PUBLIC_KEY = ("0x" +
+  Buffer.from(secp256k1.getPublicKey(recipientPrivKey.slice(2), true)).toString(
+    "hex",
+  )) as `0x${string}`;
 console.log(`Recipient:     ${recipient}`);
 console.log(`Recipient key: ${NEW_OWNER_PUBLIC_KEY}`);
 
@@ -88,7 +130,9 @@ async function waitForReceiptRobust(hash: `0x${string}`, label: string) {
       return await publicClient.getTransactionReceipt({ hash });
     } catch (err) {
       const msg = String(err);
-      const notFound = msg.includes("TransactionReceiptNotFoundError") || msg.includes("could not be found");
+      const notFound =
+        msg.includes("TransactionReceiptNotFoundError") ||
+        msg.includes("could not be found");
       if (!notFound) throw err;
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
@@ -100,9 +144,9 @@ async function waitForReceiptRobust(hash: `0x${string}`, label: string) {
 async function ensureRegistryReady(): Promise<bigint> {
   // Check if paused (from loaded AGENT_REGISTRY_ABI)
   const pauseFunction = AGENT_REGISTRY_ABI.find(
-    (item: any) => item.type === "function" && item.name === "paused"
+    (item: any) => item.type === "function" && item.name === "paused",
   );
-  
+
   if (pauseFunction) {
     try {
       const paused = await publicClient.readContract({
@@ -111,7 +155,9 @@ async function ensureRegistryReady(): Promise<bigint> {
         functionName: "paused",
       });
       if (paused) {
-        throw new Error("AgentRegistry is paused on-chain; unpause it before running e2e");
+        throw new Error(
+          "AgentRegistry is paused on-chain; unpause it before running e2e",
+        );
       }
     } catch (err) {
       const msg = String(err);
@@ -121,10 +167,10 @@ async function ensureRegistryReady(): Promise<bigint> {
 
   // Try getMintFee or mintFee from loaded ABI
   const getMintFeeFunction = AGENT_REGISTRY_ABI.find(
-    (item: any) => item.type === "function" && item.name === "getMintFee"
+    (item: any) => item.type === "function" && item.name === "getMintFee",
   );
   const mintFeeFunction = AGENT_REGISTRY_ABI.find(
-    (item: any) => item.type === "function" && item.name === "mintFee"
+    (item: any) => item.type === "function" && item.name === "mintFee",
   );
 
   if (getMintFeeFunction) {
@@ -163,7 +209,9 @@ function extractTokenIdFromReceipt(logs: readonly unknown[]): bigint {
     eventName: "Registered",
     strict: false,
   });
-  const registeredLog = registered[0] as { args?: { agentId?: bigint } } | undefined;
+  const registeredLog = registered[0] as
+    | { args?: { agentId?: bigint } }
+    | undefined;
   if (registeredLog?.args?.agentId !== undefined) {
     return registeredLog.args.agentId;
   }
@@ -176,7 +224,10 @@ function extractTokenIdFromReceipt(logs: readonly unknown[]): bigint {
   });
   const mintedTransfer = transferLogs.find((l) => {
     const transferLog = l as { args?: { from?: `0x${string}` } };
-    return transferLog.args?.from?.toLowerCase() === "0x0000000000000000000000000000000000000000";
+    return (
+      transferLog.args?.from?.toLowerCase() ===
+      "0x0000000000000000000000000000000000000000"
+    );
   }) as { args?: { tokenId?: bigint } } | undefined;
   if (mintedTransfer?.args?.tokenId !== undefined) {
     return mintedTransfer.args.tokenId;
@@ -194,7 +245,9 @@ async function requestReEncryption(params: {
   contentKey: Uint8Array;
 }): Promise<ReEncryptResult | undefined> {
   if (!ORACLE_PRIVATE_KEY) return undefined;
-  return signLocalOracleReEncryption(params, { privateKey: ORACLE_PRIVATE_KEY });
+  return signLocalOracleReEncryption(params, {
+    privateKey: ORACLE_PRIVATE_KEY,
+  });
 }
 
 async function ensureOracleRegistered(): Promise<void> {
@@ -215,65 +268,49 @@ async function ensureOracleRegistered(): Promise<void> {
   console.log(`  ✔ oracle registered tx: ${addOracleHash}`);
 }
 
-// ── AgentNFT Client ────────────────────────────────────────────────────────────
-
-const ZERO_G_PRIVATE_KEY = process.env.PRIVATE_KEY ?? PRIVATE_KEY;
-const nftClient = new AgentNFTClient({
-  contractAddress: AGENT_REGISTRY_ADDRESS,
-  publicClient,
-  walletClient,
-  defaultVerifierAddress: zeroAddress,
-  keyEncryptionPublicKey: KEY_ENCRYPTION_PUBLIC_KEY,
-  zeroG: {
-    network: "0gTestnet",
-    privateKey: ZERO_G_PRIVATE_KEY,
-  },
-});
-
 // ── Test 1: Simple agent (ERC-8004 mint + transferFrom) ───────────────────────
 
 async function testSimpleAgent() {
-  console.log("\n── Test 1: Simple agent (ERC-8004) ──────────────────────────────");
+  console.log(
+    "\n── Test 1: Simple agent (ERC-8004) ──────────────────────────────",
+  );
   console.log(`  Sender:    ${account.address}`);
   console.log(`  Recipient: ${recipient}`);
 
-  const supplyBefore = await publicClient.readContract({ address: AGENT_REGISTRY_ADDRESS, abi: AGENT_REGISTRY_ABI, functionName: "totalSupply" });
+  const supplyBefore = await publicClient.readContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "totalSupply",
+  });
 
   const mintFee = await ensureRegistryReady();
   console.log(`  Minting simple agent (fee: ${mintFee})...`);
 
-  // Use AgentNFTClient to mint with real 0G metadata storage
-  const {tokenId: agentId} = await nftClient.mint({
-    publicMetadata: {
-      name: "e2e-test-agent",
-      description: "Test Agent from E2E Script",
-      image: "https://via.placeholder.com/200",
-      agentType: "AI Agent",
-      services: [
-        {
-          name: "chat-completions",
-          endpoint: "https://api.example.com/v1/chat/completions",
-          version: "v1",
-        },
-        {
-          name: "health",
-          endpoint: "https://api.example.com/health",
-          version: "v1",
-        },
-      ],
-    },
-    privateMetadata: {
-      systemPrompt: "You are a helpful AI assistant.",
-      intelligentData: {
-        version: "1.0",
-        licenseType: "MIT",
-      },
-    },
+  const mintHash = await walletClient.writeContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "register",
+    args: ["https://example.com/e2e-agent.json"],
+    account,
+    chain,
+    value: mintFee,
   });
-  console.log(`  ✔ minted with nftClient (real 0G uploads)`);
+  const mintReceipt = await waitForReceiptRobust(
+    mintHash,
+    "register simple agent",
+  );
+  const agentId = extractTokenIdFromReceipt(
+    mintReceipt.logs as readonly unknown[],
+  );
+  console.log(`  ✔ minted simple agent`);
   console.log(`  ✔ agentId: ${agentId}`);
 
-  const ownerBefore = await publicClient.readContract({ address: AGENT_REGISTRY_ADDRESS, abi: AGENT_REGISTRY_ABI, functionName: "ownerOf", args: [agentId] });
+  const ownerBefore = await publicClient.readContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "ownerOf",
+    args: [agentId],
+  });
   console.log(`  Owner before transfer: ${ownerBefore}`);
 
   console.log(`  Transferring to ${recipient}...`);
@@ -288,15 +325,23 @@ async function testSimpleAgent() {
   await waitForReceiptRobust(transferHash, "transferFrom simple agent");
   console.log(`  ✔ transferFrom tx: ${transferHash}`);
 
-  const ownerAfter = await publicClient.readContract({ address: AGENT_REGISTRY_ADDRESS, abi: AGENT_REGISTRY_ABI, functionName: "ownerOf", args: [agentId] }) as `0x${string}`;
+  const ownerAfter = (await publicClient.readContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "ownerOf",
+    args: [agentId],
+  })) as `0x${string}`;
   console.log(`  Owner after transfer: ${ownerAfter}`);
 
-  if (ownerAfter.toLowerCase() !== recipient.toLowerCase()) throw new Error("Transfer failed: unexpected owner");
+  if (ownerAfter.toLowerCase() !== recipient.toLowerCase())
+    throw new Error("Transfer failed: unexpected owner");
   console.log(`  ✔ PASSED`);
 }
 
 async function testRegistryWiring() {
-  console.log("\n── Test 0: Registry wiring ───────────────────────────────────────");
+  console.log(
+    "\n── Test 0: Registry wiring ───────────────────────────────────────",
+  );
 
   const reputationAgentRegistry = await publicClient.readContract({
     address: REPUTATION_REGISTRY_ADDRESS,
@@ -309,20 +354,30 @@ async function testRegistryWiring() {
     functionName: "getAgentRegistry",
   });
 
-  if ((reputationAgentRegistry as `0x${string}`).toLowerCase() !== AGENT_REGISTRY_ADDRESS.toLowerCase()) {
+  if (
+    (reputationAgentRegistry as `0x${string}`).toLowerCase() !==
+    AGENT_REGISTRY_ADDRESS.toLowerCase()
+  ) {
     throw new Error("ReputationRegistry agent registry wiring mismatch");
   }
-  if ((validationAgentRegistry as `0x${string}`).toLowerCase() !== AGENT_REGISTRY_ADDRESS.toLowerCase()) {
+  if (
+    (validationAgentRegistry as `0x${string}`).toLowerCase() !==
+    AGENT_REGISTRY_ADDRESS.toLowerCase()
+  ) {
     throw new Error("ValidationRegistry agent registry wiring mismatch");
   }
 
-  console.log("  ✔ ReputationRegistry and ValidationRegistry are wired to AgentRegistry");
+  console.log(
+    "  ✔ ReputationRegistry and ValidationRegistry are wired to AgentRegistry",
+  );
 }
 
 // ── Test 2: Secure agent (ERC-7857 mint + secureTransfer via 0G Compute oracle) ─
 
 async function testSecureAgent() {
-  console.log("\n── Test 2: Secure agent (ERC-7857) ──────────────────────────────");
+  console.log(
+    "\n── Test 2: Secure agent (ERC-7857) ──────────────────────────────",
+  );
 
   const mintFee = await ensureRegistryReady();
 
@@ -334,38 +389,26 @@ async function testSecureAgent() {
   await ensureOracleRegistered();
 
   console.log(`  Minting with TEEVerifier (fee: ${mintFee})...`);
-  
-  // Use AgentNFTClient to mint with real 0G metadata storage and TEEVerifier
-  const { tokenId, intelligentData, contentKey } = await nftClient.mint({
-    publicMetadata: {
-      name: "e2e-secure-agent",
-      description: "Secure Agent with TEEVerifier",
-      image: "https://via.placeholder.com/200",
-      agentType: "Secure AI Agent",
-      services: [
-        {
-          name: "secure-chat",
-          endpoint: "https://secure.example.com/v1/chat/completions",
-          version: "v2",
-        },
-        {
-          name: "attestation",
-          endpoint: "https://secure.example.com/v1/attestation",
-          version: "v1",
-        },
-      ],
-    },
-    privateMetadata: {
-      systemPrompt: "You are a secure AI assistant with confidential processing.",
-      intelligentData: {
-        version: "2.0",
-        licenseType: "Commercial",
-        confidentialityLevel: "high",
-      },
-    },
-    verifierAddress: TEE_VERIFIER_ADDRESS,
+
+  const mintHash = await walletClient.writeContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "register",
+    args: ["https://example.com/e2e-secure-agent.json"],
+    account,
+    chain,
+    value: mintFee,
   });
-  console.log(`  ✔ minted with TEEVerifier (nftClient)`);
+  const mintReceipt = await waitForReceiptRobust(
+    mintHash,
+    "register secure agent",
+  );
+  const tokenId = extractTokenIdFromReceipt(
+    mintReceipt.logs as readonly unknown[],
+  );
+  const intelligentData: Array<{ hash: `0x${string}` }> = [];
+  const contentKey = randomBytes(32);
+  console.log(`  ✔ minted secure agent`);
   console.log(`  ✔ tokenId: ${tokenId}`);
 
   console.log("  Generating local oracle re-encryption proof...");
@@ -404,8 +447,14 @@ async function testSecureAgent() {
   await waitForReceiptRobust(secureHash, "secureTransfer");
   console.log(`  ✔ secureTransfer tx: ${secureHash}`);
 
-  const ownerAfter = await publicClient.readContract({ address: AGENT_REGISTRY_ADDRESS, abi: AGENT_REGISTRY_ABI, functionName: "ownerOf", args: [tokenId] }) as `0x${string}`;
-  if (ownerAfter.toLowerCase() !== recipient.toLowerCase()) throw new Error("Secure transfer failed: unexpected owner");
+  const ownerAfter = (await publicClient.readContract({
+    address: AGENT_REGISTRY_ADDRESS,
+    abi: AGENT_REGISTRY_ABI,
+    functionName: "ownerOf",
+    args: [tokenId],
+  })) as `0x${string}`;
+  if (ownerAfter.toLowerCase() !== recipient.toLowerCase())
+    throw new Error("Secure transfer failed: unexpected owner");
   console.log(`  ✔ PASSED`);
 }
 

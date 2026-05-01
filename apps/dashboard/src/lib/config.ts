@@ -2,7 +2,7 @@
 
 import { defineChain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { mainnet, sepolia } from "viem/chains";
+import { Chain, mainnet, sepolia } from "viem/chains";
 
 const ZERO_G_NETWORKS = new Set(["0gTestnet", "0gMainnet"]);
 export const zeroGTestnet = defineChain({
@@ -25,7 +25,7 @@ export const zeroGTestnet = defineChain({
     },
   },
   testnet: true,
-});
+}) as Chain;
 export const zeroGMainnet = defineChain({
   id: 16661,
   name: "0G Mainnet",
@@ -46,7 +46,7 @@ export const zeroGMainnet = defineChain({
     },
   },
   testnet: false,
-});
+}) as Chain;
 
 export const NETWORKS = {
   sepolia,
@@ -55,21 +55,45 @@ export const NETWORKS = {
   "0gMainnet": zeroGMainnet,
 } as const;
 
+const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? "").toLowerCase();
+export const APP_CHAIN: Chain = ["0gmainnet"].includes(NETWORK)
+  ? zeroGMainnet
+  : zeroGTestnet;
+export const ENS_CHAIN: Chain = ["sepolia", "0gtestnet"].includes(NETWORK)
+  ? sepolia
+  : mainnet;
+
 export const cfg = {
   network: process.env.NEXT_PUBLIC_NETWORK ?? "0gTestnet",
-  registryAddress: process.env.AGENT_REGISTRY_ADDRESS as `0x${string}` | undefined,
-  ensRegistryAddress: process.env.ENS_AGENT_REGISTRY_ADDRESS as `0x${string}` | undefined,
-  reputationAddress: process.env.REPUTATION_REGISTRY_ADDRESS as `0x${string}` | undefined,
-  validationAddress: process.env.VALIDATION_REGISTRY_ADDRESS as `0x${string}` | undefined,
-  teeVerifierAddress: process.env.NEXT_PUBLIC_TEE_VERIFIER_ADDRESS as `0x${string}` | undefined,
+  registryAddress: process.env.AGENT_REGISTRY_ADDRESS as
+    | `0x${string}`
+    | undefined,
+  ensRegistryAddress: process.env.ENS_AGENT_REGISTRY_ADDRESS as
+    | `0x${string}`
+    | undefined,
+  reputationAddress: process.env.REPUTATION_REGISTRY_ADDRESS as
+    | `0x${string}`
+    | undefined,
+  validationAddress: process.env.VALIDATION_REGISTRY_ADDRESS as
+    | `0x${string}`
+    | undefined,
+  teeVerifierAddress: process.env.NEXT_PUBLIC_TEE_VERIFIER_ADDRESS as
+    | `0x${string}`
+    | undefined,
   rpcUrl: process.env.RPC_URL,
   deployerKey: process.env.PRIVATE_KEY as `0x${string}` | undefined,
-  oracleKey: (process.env.ORACLE_PRIVATE_KEY as `0x${string}` | undefined) ?? (process.env.PRIVATE_KEY as `0x${string}` | undefined),
+  oracleKey:
+    (process.env.ORACLE_PRIVATE_KEY as `0x${string}` | undefined) ??
+    (process.env.PRIVATE_KEY as `0x${string}` | undefined),
   zeroGKey: process.env.PRIVATE_KEY,
   get keyEncryptionPublicKey() {
-    const configured = process.env.TEE_ENCRYPTION_PUBLIC_KEY as `0x${string}` | undefined;
+    const configured = process.env.TEE_ENCRYPTION_PUBLIC_KEY as
+      | `0x${string}`
+      | undefined;
     if (configured) return configured;
-    return this.oracleKey ? (privateKeyToAccount(this.oracleKey).publicKey as `0x${string}`) : undefined;
+    return this.oracleKey
+      ? (privateKeyToAccount(this.oracleKey).publicKey as `0x${string}`)
+      : undefined;
   },
   get chain() {
     return NETWORKS[this.network as keyof typeof NETWORKS] ?? zeroGTestnet;

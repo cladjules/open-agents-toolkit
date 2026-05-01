@@ -132,12 +132,7 @@ const agent = await registry.resolve(agentId);
 // → { agentId, owner, agentWallet, metadataUri, metadata: AgentRegistrationFile }
 
 // Reputation
-const entries = await registry.getFeedback(
-  agentId,
-  clientAddresses,
-  tag1,
-  tag2,
-);
+const entries = await registry.getAllFeedbacks(agentId);
 const summary = await registry.getReputationSummary(agentId, clientAddresses);
 
 // Validation

@@ -11,11 +11,18 @@
 
 import type { Address, Hex, PublicClient } from "viem";
 import { NFTError } from "@open-agents-toolkit/core";
-import type { AgentNFTRecord, AgentPrivateMetadata } from "@open-agents-toolkit/core";
+import type {
+  AgentNFTRecord,
+  AgentPrivateMetadata,
+} from "@open-agents-toolkit/core";
 import { decryptMetadata, hashEncryptedBlob } from "./encryption.js";
 import type { EncryptedBlob } from "./encryption.js";
 import { AGENT_REGISTRY_ABI } from "./abis.js";
-import createDebug from "debug";
+
+const createDebug =
+  (namespace: string) =>
+  (...args: unknown[]) =>
+    console.log(`[${namespace}]`, ...args);
 
 const log = createDebug("oat:agent-nft");
 const logMetadata = createDebug("oat:agent-nft:metadata");
@@ -76,7 +83,10 @@ export class AgentNFTClient {
 
     const pubMetaRes = await fetch(publicMetadataUri as string);
     if (!pubMetaRes.ok) {
-      throw new NFTError("STORAGE_ERROR", `Failed to fetch public metadata: ${pubMetaRes.status}`);
+      throw new NFTError(
+        "STORAGE_ERROR",
+        `Failed to fetch public metadata: ${pubMetaRes.status}`,
+      );
     }
     const pubMeta = (await pubMetaRes.json()) as any;
     const publicItems = pubMeta.intelligentData ?? [];
@@ -119,7 +129,10 @@ export class AgentNFTClient {
       const blob = (await blobRes.json()) as EncryptedBlob;
       const computedHash = await hashEncryptedBlob(blob);
       if (computedHash !== item.hash) {
-        throw new NFTError("VERIFICATION_FAILED", `Encrypted blob hash mismatch for ${item.name}.`);
+        throw new NFTError(
+          "VERIFICATION_FAILED",
+          `Encrypted blob hash mismatch for ${item.name}.`,
+        );
       }
 
       decryptedEntries.push({
@@ -136,41 +149,44 @@ export class AgentNFTClient {
    */
   async getRecord(tokenId: bigint): Promise<AgentNFTRecord> {
     logMetadata("getRecord tokenId=%s", tokenId.toString());
-    const [owner, publicMetadataUri, intelligentData, verifierContract] = await Promise.all([
-      this._cfg.publicClient.readContract({
-        address: this._cfg.contractAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "ownerOf",
-        args: [tokenId],
-      }),
-      this._cfg.publicClient.readContract({
-        address: this._cfg.contractAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "tokenURI",
-        args: [tokenId],
-      }),
-      this._cfg.publicClient.readContract({
-        address: this._cfg.contractAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "intelligentDataOf",
-        args: [tokenId],
-      }),
-      this._cfg.publicClient.readContract({
-        address: this._cfg.contractAddress,
-        abi: AGENT_REGISTRY_ABI,
-        functionName: "verifier",
-        args: [],
-      }),
-    ]);
+    const [owner, publicMetadataUri, intelligentData, verifierContract] =
+      await Promise.all([
+        this._cfg.publicClient.readContract({
+          address: this._cfg.contractAddress,
+          abi: AGENT_REGISTRY_ABI,
+          functionName: "ownerOf",
+          args: [tokenId],
+        }),
+        this._cfg.publicClient.readContract({
+          address: this._cfg.contractAddress,
+          abi: AGENT_REGISTRY_ABI,
+          functionName: "tokenURI",
+          args: [tokenId],
+        }),
+        this._cfg.publicClient.readContract({
+          address: this._cfg.contractAddress,
+          abi: AGENT_REGISTRY_ABI,
+          functionName: "intelligentDataOf",
+          args: [tokenId],
+        }),
+        this._cfg.publicClient.readContract({
+          address: this._cfg.contractAddress,
+          abi: AGENT_REGISTRY_ABI,
+          functionName: "verifier",
+          args: [],
+        }),
+      ]);
 
     return {
       tokenId,
       owner: owner as Address,
       publicMetadataUri: publicMetadataUri as string,
-      intelligentData: (intelligentData as OnChainIntelligentData[]).map((item) => ({
-        name: item.dataDescription,
-        hash: item.dataHash,
-      })),
+      intelligentData: (intelligentData as OnChainIntelligentData[]).map(
+        (item) => ({
+          name: item.dataDescription,
+          hash: item.dataHash,
+        }),
+      ),
       verifierContract: verifierContract as Address,
       mintedAt: 0,
     };
@@ -185,13 +201,16 @@ export class AgentNFTClient {
     log("content key provided for tokenId=%s", tokenId.toString());
   }
 
-  private _rebuildPrivateMetadata(entries: readonly PrivateMetadataEntry[]): AgentPrivateMetadata {
+  private _rebuildPrivateMetadata(
+    entries: readonly PrivateMetadataEntry[],
+  ): AgentPrivateMetadata {
     let systemPrompt: string | undefined;
     const intelligentData: Record<string, unknown> = {};
 
     for (const entry of entries) {
       if (entry.name === "systemPrompt") {
-        systemPrompt = typeof entry.value === "string" ? entry.value : String(entry.value);
+        systemPrompt =
+          typeof entry.value === "string" ? entry.value : String(entry.value);
         continue;
       }
       intelligentData[entry.name] = entry.value;

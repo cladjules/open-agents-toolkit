@@ -1,0 +1,28 @@
+{
+  "name": "open-agents-toolkit",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.13.0",
+  "description": "Web3-Aware AI Agent SDK — giving any AI agent framework full Web3 awareness",
+  "workspaces": [
+    "apps/dashboard",
+    "packages/core",
+    "packages/compute",
+    "packages/agent-nft"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "@turbo/gen": "^2.9.7",
+    "turbo": "^2.9.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
