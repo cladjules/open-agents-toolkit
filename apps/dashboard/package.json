@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@0gfoundation/0g-ts-sdk": "1.2.8",
-    "@open-agents-toolkit/core": "file:../../packages/core",
-    "@open-agents-toolkit/agent-nft": "file:../../packages/agent-nft",
+    "@open-agents-toolkit/core": "*",
+    "@open-agents-toolkit/agent-nft": "*",
     "ethers": "6.13.1",
     "next": "16.2.4",
     "react": "19.2.5",
