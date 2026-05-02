@@ -45,7 +45,7 @@ Store sensitive agent data (system prompts, API keys, skills, knowledge bases) w
    - AES-256-GCM encrypted private metadata (system prompts, API keys, skills, knowledge bases) anchored on-chain via content hashes
 3. **Trade** the NFT — the ENS domain and encrypted skills transfer together; private metadata is re-encrypted for the new owner inside a compute node, verified on-chain by `TEEVerifier`. Alternatively, transfer the ENS domain directly and our relayer detects the transaction, automatically transferring agent ownership cross-chain.
 4. **Accumulate reputation** via client feedback with Sybil-resistant scoring, visible to all via the shared ENS domain
-5. **Request external validation** from TEE oracles, zkML provers, or staker re-execution via `ValidationRegistry`
+5. **Request validation** from TEE oracles or staker re-execution via `ValidationRegistry`
 6. **Decrypt skills** — only approved agents or the owner can decrypt and use the agent's encrypted data
 7. **Run AI inference** through the 0G Compute Network (pay-per-request, OpenAI-compatible API) - Coming soon
 
@@ -58,14 +58,14 @@ open-agents-toolkit/
 ├── packages/
 │   ├── core/          # Shared types, error classes, EIP-712 utilities, network config
 │   ├── agent-nft/     # ERC-7857 client: metadata, decryption, ABIs, 0G Storage, server helpers
-│   └── compute/       # 0G Compute: AI inference + TDX re-encryption oracle
+│   └── compute/       # 0G Storage and TEE re-encryption oracle
 ├── contracts/         # Solidity contracts (Hardhat 3 + viaIR)
 │   ├── src/
 │   │   ├── AgentRegistry.sol       # ERC-8004 + ERC-721 identity registry
 │   │   ├── ReputationRegistry.sol  # Client feedback with Sybil-resistant scoring
-│   │   ├── ValidationRegistry.sol  # TEE / zkML / staker validation hooks
+│   │   ├── ValidationRegistry.sol  # TEE validation hooks
 │   │   ├── ENSAgentRegistry.sol    # ENS-native registry w/ cross-chain ownership mirror
-│   │   └── TEEVerifier.sol         # ECDSA attestation verifier for  oracle proofs
+│   │   └── TEEVerifier.sol         # ECDSA attestation verifier for oracle proofs
 │   ├── test/          # 60+ tests (node:test + viem)
 │   └── ignition/      # Hardhat Ignition deployment modules
 ├── apps/
@@ -223,7 +223,7 @@ const metadata = await readZeroGJSON<AgentRegistrationFile>(
 
 ### `@open-agents-toolkit/compute`
 
-0G Compute Network client for AI inference and TDX re-encryption oracle.
+0G ai inference and re-encryption oracle.
 
 #### AI inference
 
@@ -242,7 +242,7 @@ const { content } = await compute.inference({
 });
 ```
 
-#### TDX re-encryption oracle (ERC-7857 transfers)
+#### re-encryption oracle (ERC-7857 transfers)
 
 ```typescript
 const { newDataHashes, sealedKey, proof } = await compute.requestReEncryption({
@@ -254,20 +254,6 @@ const { newDataHashes, sealedKey, proof } = await compute.requestReEncryption({
   intelligentDataHashes: currentOnChainHashes,
 });
 // Frontend calls: AgentNFT.secureTransfer(tokenId, newOwner, newDataHashes, sealedKey, proof)
-```
-
-Oracle flow:
-
-```
-Client               0G Compute Node                  Chain
-──────               ───────────────────                  ─────
-requestReEncryption()
-  POST /chat/completions {action:"reencrypt", contentKey, ...}
-  ─────────────────────────────────────────>
-                         Re-encrypt under newOwnerPublicKey (ECIES)
-                         Sign (tokenId, from, to, oldHashes, newHashes)
-  <─────────────────────────────────────────
-  AgentNFT.secureTransfer(...)  ──────────────────────>  TEEVerifier.verifySignature()
 ```
 
 ---
@@ -283,7 +269,7 @@ The `apps/dashboard` Next.js 15 app is the primary UI.
 **Key server actions:**
 
 - `prepareCreateAgent` — upload metadata to 0G, return `intelligentData[]` for frontend mint call
-- `prepareTransferAgent` — call 0G Compute oracle, build `secureTransfer` payload
+- `prepareTransferAgent` — call Compute oracle, build `secureTransfer` payload
 - `prepareUpdateServices` — re-encrypt and upload updated service metadata
 - `getRegisteredAgents` / `getAgent` — read agent state from chain and 0G Storage
 - `decryptAgentIntelligentData` — decrypt encrypted blobs after ownership transfer
@@ -315,19 +301,9 @@ cd contracts && npm test
 
 ### Deploy contracts
 
-**Local Hardhat node:**
-
-```bash
-cd contracts
-npx hardhat node
-# In a separate terminal:
-npm run deploy -- --network localhost
-```
-
 **0G Galileo testnet** (Chain ID 16602):
 
 ```bash
-# contracts/.env: ZERO_G_RPC_URL=https://evmrpc-testnet.0g.ai, PRIVATE_KEY
 # Tokens: https://faucet.0g.ai
 npm run deploy:zeroG
 ```
@@ -335,46 +311,39 @@ npm run deploy:zeroG
 **Sepolia:**
 
 ```bash
-# contracts/.env: SEPOLIA_RPC_URL, PRIVATE_KEY
-npm run deploy:sepolia
+  npm run deploy:sepolia
 ```
 
 ### Register a TEE oracle
 
 ```bash
-cd contracts
-TEE_VERIFIER_ADDRESS=0x...  \
-  npx hardhat ignition deploy ignition/modules/AddOracle.ts --network zeroG
+  npm run addOracle:zeroG
 ```
 
-Use `ZeroGComputeClient.listServices()` to discover available providers.
+### Register a Keeper address that can act as a contract admin
+
+```bash
+  npm run setKeeper:zeroG
+```
 
 ### Run the dashboard
 
 ```bash
-# Auto-populate contract addresses from latest deployment
-npm run setup-env --prefix contracts
-
 cd apps/dashboard
 cp .env.example .env
 npm run dev
+
+
+# Auto-populate contract addresses from latest deployment
+cd ../../contracts
+npm run setup-env
 ```
 
 ---
 
 ## Environment Variables
 
-| Variable                                  | Description                                 |
-| ----------------------------------------- | ------------------------------------------- |
-| `PRIVATE_KEY`                             | Deployer / server EOA private key           |
-| `NEXT_PUBLIC_AGENT_NFT_ADDRESS`           | Deployed `AgentNFT` contract                |
-| `NEXT_PUBLIC_AGENT_REGISTRY_ADDRESS`      | Deployed `AgentRegistry` contract           |
-| `NEXT_PUBLIC_REPUTATION_REGISTRY_ADDRESS` | Deployed `ReputationRegistry` contract      |
-| `NEXT_PUBLIC_VALIDATION_REGISTRY_ADDRESS` | Deployed `ValidationRegistry` contract      |
-| `NEXT_PUBLIC_TEE_VERIFIER_ADDRESS`        | Deployed `TEEVerifier` contract             |
-| `NEXT_PUBLIC_ENS_AGENT_REGISTRY_ADDRESS`  | Deployed `ENSAgentRegistry` contract        |
-| `ZERO_G_PRIVATE_KEY`                      | Key for 0G Storage uploads (server actions) |
-| `ZERO_G_COMPUTE_ORACLE_PROVIDER`          | 0G Compute provider URL for TEE oracle      |
+See `.env.example`
 
 ---
 

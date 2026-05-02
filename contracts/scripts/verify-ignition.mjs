@@ -60,7 +60,7 @@ const tasks = [
     contract: "src/AgentRegistry.sol:AgentRegistry",
     args:
       deployer && teeVerifier
-        ? ["\"Open Agents Toolkit\"", "\"OAT\"", deployer, teeVerifier]
+        ? ['"Open Agents Toolkit"', '"OAT"', deployer, teeVerifier]
         : null,
   },
   {
@@ -86,10 +86,13 @@ const tasks = [
 let failed = 0;
 
 try {
-  const probe = await fetch(`${explorerApiUrl}?module=block&action=eth_block_number`, {
-    method: "GET",
-    headers: { accept: "application/json" },
-  });
+  const probe = await fetch(
+    `${explorerApiUrl}?module=block&action=eth_block_number`,
+    {
+      method: "GET",
+      headers: { accept: "application/json" },
+    },
+  );
   const contentType = probe.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("json")) {
     process.exit(0);
@@ -100,7 +103,9 @@ try {
 
 for (const task of tasks) {
   if (!task.address || task.args === null) {
-    console.warn(`Skipping ${task.label}: missing deployment data or constructor args.`);
+    console.warn(
+      `Skipping ${task.label}: missing deployment data or constructor args.`,
+    );
     continue;
   }
 
@@ -122,9 +127,6 @@ for (const task of tasks) {
   } catch (err) {
     failed += 1;
     console.error(`Verification failed for ${task.label}.`);
-    if (process.env.VERIFY_STRICT === "1") {
-      process.exit(1);
-    }
   }
 }
 
