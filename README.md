@@ -1,6 +1,6 @@
 # Open Agents Toolkit
 
-> Own, trade, and manage AI agents on blockchain as ERC-721 NFTs. Each agent comes with its own [ENS](https://ens.domains) domain, verifiable reputation, and encrypted skills that transfer securely to new owners.
+> Own, trade, and manage AI agents on blockchain as ERC-721/ERC-7857 NFTs with ERC-8004 reputation. Each agent comes with its own ENS domain, verifiable on-chain reputation, and encrypted skills that transfer securely to new owners.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.35-blue)](https://soliditylang.org)
@@ -11,19 +11,37 @@
 
 ## What is it?
 
-Open Agents Toolkit (OAT) lets you launch AI agents on blockchain as ERC-721 NFTs with integrated [ENS](https://ens.domains) domains. Each agent is a standalone, tradeable asset — when you mint an agent, it gets a dedicated `.eth` domain, on-chain reputation tracking, and encrypted skills data. When you trade or transfer the agent NFT, the ENS domain and all encrypted skills move with it to the new owner. Only approved agents or the owner can decrypt and access the agent's sensitive data (prompts, API keys, knowledge bases).
+Open Agents Toolkit (OAT) lets you launch AI agents on blockchain as NFTs — compatible with both ERC-721 and ERC-7857 — with integrated ENS domains and ERC-8004 reputation. Each agent is a standalone, tradeable asset — when you mint an agent, it gets a dedicated `.eth` domain, on-chain reputation tracking via ERC-8004, and encrypted skills data. When you trade or transfer the agent NFT, the ENS domain, accumulated reputation, and all encrypted skills move with it to the new owner. Only approved agents or the owner can decrypt and access the agent's sensitive data (prompts, API keys, knowledge bases).
 
 **Architecture:** The frontend (Next.js dashboard) owns all contract writes directly via viem. The SDK packages provide read-only clients, encryption/decryption utilities, and server-side helpers for data preparation and 0G Storage interactions.
 
 ---
 
+## How It's Made
+
+OAT is built across three layers: on-chain contracts, a TypeScript SDK monorepo, and a Next.js 15 dashboard.
+
+**Smart contracts** (Solidity 0.8.35, Hardhat 3, `viaIR`) implement three ERC standards in a single deployment set. `AgentRegistry` is both ERC-8004 and ERC-721 — agents are minted as NFTs while the registry tracks identity, agent wallet registration (proved via EIP-712 signature), and metadata URIs stored on 0G Storage. `ReputationRegistry` (ERC-8004) stores fixed-point int128 feedback entries with Sybil-resistant client filtering exposed through a `getSummary` view. `ValidationRegistry` (ERC-8004) handles request/response cycles for TEE oracles and staker re-execution with progressive finality. `TEEVerifier` (ERC-7857) verifies ECDSA oracle attestations on-chain. `ENSAgentRegistry` maps ENS namehashes to agent identities and mirrors ownership cross-chain via a KeeperHub relayer — transferring the `.eth` domain is enough to trigger an ownership handoff without touching the NFT directly.
+
+**Encryption stack**: private metadata (system prompts, API keys, skills) is encrypted with AES-256-GCM before leaving the browser. The AES content key is sealed to the owner's public key using ECIES. On NFT transfer, the 0G Compute oracle runs inside a TEE, unseals the old content key, re-seals it to the new owner's public key, and posts an ECDSA attestation verified on-chain by `TEEVerifier` before the transfer finalises. Content hashes are anchored on-chain so any tampering is detectable.
+
+**0G Storage and Compute** are used throughout: all public metadata (agent registration files, service manifests) is stored on 0G Storage under `zerog://` URIs, and AI inference runs pay-per-request through the 0G Compute Network's OpenAI-compatible API.
+
+**SDK monorepo** (`packages/`) is split into `core` (shared types, EIP-712 helpers, network config — zero runtime deps), `agent-nft` (read-only ERC-7857 client, encryption utils, 0G Storage client, server helpers), and `compute` (0G Compute inference client + re-encryption oracle wrapper).
+
+**Frontend** (Next.js 15 App Router + viem): all contract writes happen directly in the browser via `writeContract` — no backend proxy or relayer for the happy path. Next.js Server Actions handle the only things that must stay server-side: data encryption, 0G Storage uploads, and Compute oracle calls. This keeps private keys and AES content keys off the client while avoiding any API route indirection for internal mutations.
+
+**Notable hack**: ENS domain transfer as a cross-chain ownership trigger. Rather than requiring users to interact with the NFT contract on the target chain, transferring the `.eth` domain (which lives on Ethereum mainnet) is detected by a KeeperHub relayer that mirrors ownership to the deployment chain automatically — making the ENS name the canonical identifier for the agent across chains.
+
+---
+
 ## Key Features
 
-### 1. **ERC-721 NFT Agents with Integrated [ENS](https://ens.domains) Domains**
+### 1. **ERC-721/ERC-7857 NFT Agents with Integrated ENS Domains**
 
-Every agent is minted as an ERC-721 NFT with a dedicated [ENS](https://ens.domains) domain automatically attached. This means your agent has a human-readable `.eth` address that travels with the NFT — when you trade or transfer the agent, the ENS domain and all associated data (reputation, encrypted skills) move together. Agents are fully composable with existing NFT infrastructure.
+Every agent is minted as an ERC-721/ERC-7857 NFT with a dedicated ENS domain automatically attached. This means your agent has a human-readable `.eth` address that travels with the NFT — when you trade or transfer the agent, the ENS domain and all associated data (reputation, encrypted skills) move together. Agents are fully composable with existing NFT infrastructure.
 
-### 2. **Reputation & Feedback System**
+### 2. **ERC-8004 Reputation & Feedback System**
 
 Build trust through an on-chain reputation system. Clients provide feedback and scores stored in `ReputationRegistry` with Sybil-resistant scoring. Track agent performance, receive ratings from users, and accumulate verifiable reputation that travels with your agent across chains and ownership transfers.
 
