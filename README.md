@@ -1,71 +1,67 @@
 # Open Agents Toolkit
 
-> Own, trade, and manage AI agents on blockchain as ERC-721/ERC-7857 NFTs with ERC-8004 reputation. Each agent comes with its own ENS domain, verifiable on-chain reputation, and encrypted skills that transfer securely to new owners.
+Create, own, and manage AI agents on-chain with verifiable identity, private encrypted data, and transparent reputation.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.35-blue)](https://soliditylang.org)
-[![ERC-8004](https://img.shields.io/badge/ERC--8004-Trustless%20Agents-purple)](https://eips.ethereum.org/EIPS/eip-8004)
-[![ERC-7857](https://img.shields.io/badge/ERC--7857-Agent%20NFTs-cyan)](https://eips.ethereum.org/EIPS/eip-7857)
 
 ---
 
 ## What is it?
 
-Open Agents Toolkit (OAT) lets you launch AI agents on blockchain as NFTs — compatible with both ERC-721 and ERC-7857 — with integrated ENS domains and ERC-8004 reputation. Each agent is a standalone, tradeable asset — when you mint an agent, it gets a dedicated `.eth` domain, on-chain reputation tracking via ERC-8004, and encrypted skills data. When you trade or transfer the agent NFT, the ENS domain, accumulated reputation, and all encrypted skills move with it to the new owner. Only approved agents or the owner can decrypt and access the agent's sensitive data (prompts, API keys, knowledge bases).
+Open Agents Toolkit (OAT) is a full-stack framework for deploying AI agents as sovereign on-chain entities. Each agent gets a permanent identity tied to an ENS domain, private encrypted data managed through a TEE oracle, verifiable reputation scored by other agents, and all files stored on 0G decentralized storage.
 
 **Architecture:** The frontend (Next.js dashboard) owns all contract writes directly via viem. The SDK packages provide read-only clients, encryption/decryption utilities, and server-side helpers for data preparation and 0G Storage interactions.
 
 ---
 
-## How It's Made
+## Core Pillars
 
-OAT is built across three layers: on-chain contracts, a TypeScript SDK monorepo, and a Next.js 15 dashboard.
+### 1. On-Chain Agent Identity — EIP-712 + ENS
 
-**Smart contracts** (Solidity 0.8.35, Hardhat 3, `viaIR`) implement three ERC standards in a single deployment set. `AgentRegistry` is both ERC-8004 and ERC-721 — agents are minted as NFTs while the registry tracks identity, agent wallet registration (proved via EIP-712 signature), and metadata URIs stored on 0G Storage. `ReputationRegistry` (ERC-8004) stores fixed-point int128 feedback entries with Sybil-resistant client filtering exposed through a `getSummary` view. `ValidationRegistry` (ERC-8004) handles request/response cycles for TEE oracles and staker re-execution with progressive finality. `TEEVerifier` (ERC-7857) verifies ECDSA oracle attestations on-chain. `ENSAgentRegistry` maps ENS namehashes to agent identities and mirrors ownership cross-chain via a KeeperHub relayer — transferring the `.eth` domain is enough to trigger an ownership handoff without touching the NFT directly.
+Every agent is minted as an **ERC-721 NFT** and linked to an **ENS domain** (`.eth`). The ENS name is the canonical, human-readable identity for the agent across all chains.
 
-**Encryption stack**: private metadata (system prompts, API keys, skills) is encrypted with AES-256-GCM before leaving the browser. The AES content key is sealed to the owner's public key using ECIES. On NFT transfer, the 0G Compute oracle runs inside a TEE, unseals the old content key, re-seals it to the new owner's public key, and posts an ECDSA attestation verified on-chain by `TEEVerifier` before the transfer finalises. Content hashes are anchored on-chain so any tampering is detectable.
+- Agent identity is derived from the ENS **namehash node** — no centralized registry needed
+- Ownership is registered on-chain with an **EIP-712 typed-data proof**, ensuring the agent wallet signature is verifiable by anyone
+- Transferring the ENS domain triggers an automatic cross-chain ownership mirror via KeeperHub — making ENS the single source of truth for agent ownership
+- Agents are fully composable with existing NFT infrastructure (marketplaces, wallets, etc.)
 
-**0G Storage and Compute** are used throughout: all public metadata (agent registration files, service manifests) is stored on 0G Storage under `zerog://` URIs, and AI inference runs pay-per-request through the 0G Compute Network's OpenAI-compatible API.
+### 2. Private Intelligent Data — ERC-7857 + TEE Oracle
 
-**SDK monorepo** (`packages/`) is split into `core` (shared types, EIP-712 helpers, network config — zero runtime deps), `agent-nft` (read-only ERC-7857 client, encryption utils, 0G Storage client, server helpers), and `compute` (0G Compute inference client + re-encryption oracle wrapper).
+Sensitive agent data — system prompts, agent definitions, API keys, knowledge bases — is stored as **Intelligent Data** per the [ERC-7857](https://eips.ethereum.org/EIPS/eip-7857) standard. All data is encrypted at rest on **0G Storage** and anchored on-chain via content hashes.
 
-**Frontend** (Next.js 15 App Router + viem): all contract writes happen directly in the browser via `writeContract` — no backend proxy or relayer for the happy path. Next.js Server Actions handle the only things that must stay server-side: data encryption, 0G Storage uploads, and Compute oracle calls. This keeps private keys and AES content keys off the client while avoiding any API route indirection for internal mutations.
+- Data is encrypted with **AES-256-GCM**, with sealed keys managed by a **TEE Oracle** (Intel TDX via 0G Compute)
+- Only the current owner (or explicitly approved wallets) can decrypt and use the agent's private data
+- **Approve** another wallet to access your agent's data without transferring ownership
+- **Transfer** the NFT — private data is automatically re-encrypted for the new owner inside the TEE, verified on-chain by `TEEVerifier`. No plaintext ever leaves the secure enclave.
 
-**Notable hack**: ENS domain transfer as a cross-chain ownership trigger. Rather than requiring users to interact with the NFT contract on the target chain, transferring the `.eth` domain (which lives on Ethereum mainnet) is detected by a KeeperHub relayer that mirrors ownership to the deployment chain automatically — making the ENS name the canonical identifier for the agent across chains.
+### 3. On-Chain Reputation & Services — ERC-8004
 
----
+Agents earn a verifiable, tamper-proof reputation through the [ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) standard. Other agents and clients can submit scored feedback on-chain, building a trustless track record.
 
-## Key Features
+- **Reputation scores** are fixed-point values (int128 × 10^decimals) stored in `ReputationRegistry` with Sybil-resistant client filtering
+- Define **service endpoints** directly on-chain: MCP, A2A, web, DID, email, and custom protocols
+- Reputation and service definitions travel with the agent NFT — new owners inherit the agent's full history
+- Query `getSummary` to get a filtered, weighted reputation score for any agent
 
-### 1. **ERC-721/ERC-7857 NFT Agents with Integrated ENS Domains**
+### 4. Decentralized Encrypted Storage — 0G Storage
 
-Every agent is minted as an ERC-721/ERC-7857 NFT with a dedicated ENS domain automatically attached. This means your agent has a human-readable `.eth` address that travels with the NFT — when you trade or transfer the agent, the ENS domain and all associated data (reputation, encrypted skills) move together. Agents are fully composable with existing NFT infrastructure.
+Every file, metadata blob, and encrypted payload is stored on **[0G Storage](https://0g.ai)** — a decentralized storage network. Nothing is stored on centralized servers.
 
-### 2. **ERC-8004 Reputation & Feedback System**
-
-Build trust through an on-chain reputation system. Clients provide feedback and scores stored in `ReputationRegistry` with Sybil-resistant scoring. Track agent performance, receive ratings from users, and accumulate verifiable reputation that travels with your agent across chains and ownership transfers.
-
-### 3. **Encrypted Intelligent Data with TEE Proof**
-
-Store sensitive agent data (system prompts, API keys, skills, knowledge bases) with TEE cryptographic proof. Using AES-256-GCM encryption anchored on-chain.
-
-- **Mint** the agent as an ERC-7857 NFT with encrypted private metadata
-- **Trade** the NFT — private metadata is re-encrypted for the new owner inside a compute node, verified on-chain by `TEEVerifier`
-- **Decrypt** only by approved agents or the owner, ensuring skills and data remain confidential while enabling controlled access
+- Public metadata (name, description, image, services) is uploaded as JSON to 0G Storage and referenced via `zerog://` URIs
+- Private intelligent data (prompts, configs, keys) is AES-encrypted before upload; only the content hash is stored on-chain
+- Files can be fetched from `zerog://` URIs in both server and browser environments via the SDK
 
 ---
 
 ## Full Lifecycle
 
-1. **Register** an agent on-chain with its endpoints, capabilities, and metadata stored on 0G Storage
-2. **Mint** as an ERC-721 NFT with:
-   - A dedicated ENS domain (`.eth` address)
-   - AES-256-GCM encrypted private metadata (system prompts, API keys, skills, knowledge bases) anchored on-chain via content hashes
-3. **Trade** the NFT — the ENS domain and encrypted skills transfer together; private metadata is re-encrypted for the new owner inside a compute node, verified on-chain by `TEEVerifier`. Alternatively, transfer the ENS domain directly and our relayer detects the transaction, automatically transferring agent ownership cross-chain.
-4. **Accumulate reputation** via client feedback with Sybil-resistant scoring, visible to all via the shared ENS domain
-5. **Request validation** from TEE oracles or staker re-execution via `ValidationRegistry`
-6. **Decrypt skills** — only approved agents or the owner can decrypt and use the agent's encrypted data
-7. **Run AI inference** through the 0G Compute Network (pay-per-request, OpenAI-compatible API) - Coming soon
+1. **Register** — Attach an ENS domain and mint an ERC-721 NFT. Sign an EIP-712 proof to link the agent wallet on-chain.
+2. **Encrypt & Upload** — Private data (prompts, config, API keys) is encrypted with AES-256-GCM and uploaded to 0G Storage. Content hashes are anchored on-chain.
+3. **Define Services** — Publish MCP, A2A, web, and other endpoints on-chain so other agents and clients can discover and connect to your agent.
+4. **Approve or Transfer** — Approve other wallets to access your agent's private data, or transfer the NFT entirely. On transfer, the TEE re-encrypts all private data for the new owner — verified on-chain.
+5. **Earn Reputation** — Other agents and clients submit feedback scores on-chain. Reputation accumulates on the agent NFT and persists across ownership changes.
+6. **Discover** — Browse all registered agents, filter by reputation, and connect via their published service endpoints.
 
 ---
 
@@ -74,22 +70,20 @@ Store sensitive agent data (system prompts, API keys, skills, knowledge bases) w
 ```
 open-agents-toolkit/
 ├── packages/
-│   ├── core/          # Shared types, error classes, EIP-712 utilities, network config
-│   ├── agent-nft/     # ERC-7857 client: metadata, decryption, ABIs, 0G Storage, server helpers
-│   └── compute/       # 0G Storage and TEE re-encryption oracle
-├── contracts/         # Solidity contracts (Hardhat 3 + viaIR)
+│   ├── core/          # Shared types, EIP-712 utilities, network config
+│   ├── agent-nft/     # ERC-7857 client: metadata, encryption/decryption, ABIs, 0G Storage
+│   └── compute/       # 0G Compute: TEE re-encryption oracle + AI inference
+├── contracts/         # Solidity 0.8.35 (Hardhat + viaIR)
 │   ├── src/
-│   │   ├── AgentRegistry.sol       # ERC-8004 + ERC-721 identity registry
-│   │   ├── ReputationRegistry.sol  # Client feedback with Sybil-resistant scoring
+│   │   ├── AgentRegistry.sol       # ERC-8004 + ERC-721 — core agent NFT + identity
+│   │   ├── ENSAgentRegistry.sol    # ENS-native registry + cross-chain ownership mirror
+│   │   ├── ReputationRegistry.sol  # ERC-8004 feedback with Sybil-resistant scoring
 │   │   ├── ValidationRegistry.sol  # TEE validation hooks
-│   │   ├── ENSAgentRegistry.sol    # ENS-native registry w/ cross-chain ownership mirror
-│   │   └── TEEVerifier.sol         # ECDSA attestation verifier for oracle proofs
-│   ├── test/          # 60+ tests (node:test + viem)
+│   │   └── TEEVerifier.sol         # ECDSA attestation verifier for TEE oracle proofs
+│   ├── test/          # Contract tests (node:test + viem)
 │   └── ignition/      # Hardhat Ignition deployment modules
-├── apps/
-│   └── dashboard/     # Next.js 15 App Router — agent management UI
-└── examples/
-    └── langchain-agent/  # LangChain tool integration example
+└── apps/
+    └── dashboard/     # Next.js 15 App Router — agent management UI
 ```
 
 ---
@@ -98,13 +92,13 @@ open-agents-toolkit/
 
 All contracts are per-chain singletons. `ReputationRegistry`, `ValidationRegistry`, and `ENSAgentRegistry` are initialized with the `AgentRegistry` address after deployment.
 
-| Contract             | Standard           | Description                                                                                                                                          |
-| -------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AgentRegistry`      | ERC-8004 / ERC-721 | Core agent identity registry — mint agent NFT, store metadata URI on 0G Storage, register agent wallet with EIP-712 proof, on-chain metadata entries |
-| `ReputationRegistry` | ERC-8004           | Fixed-point client feedback (int128 × 10^decimals), revocations, response URIs, `getSummary` with Sybil-resistant client filtering                   |
-| `ValidationRegistry` | ERC-8004           | Request/response validation for TEE oracles, zkML provers, and staker re-execution; supports progressive finality                                    |
-| `ENSAgentRegistry`   | —                  | ENS namehash-based identity with cross-chain ownership mirror via KeeperHub                                                                          |
-| `TEEVerifier`        | ERC-7857           | ECDSA attestation verifier oracle signing keys                                                                                                       |
+| Contract             | Standard           | Description                                                                                                                          |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `AgentRegistry`      | ERC-8004 / ERC-721 | Core agent identity — mint NFT, store metadata URI on 0G Storage, register agent wallet with EIP-712 proof, on-chain service entries |
+| `ENSAgentRegistry`   | ERC-721 / EIP-712  | ENS namehash-based identity with cross-chain ownership mirror via KeeperHub                                                          |
+| `ReputationRegistry` | ERC-8004           | Fixed-point client feedback (int128 × 10^decimals), revocations, response URIs, `getSummary` with Sybil-resistant filtering          |
+| `ValidationRegistry` | ERC-8004           | Request/response validation for TEE oracles, zkML provers, and staker re-execution                                                   |
+| `TEEVerifier`        | ERC-7857           | ECDSA attestation verifier for TEE oracle signing keys                                                                               |
 
 Contract ABIs are exported from `@open-agents-toolkit/agent-nft`:
 
@@ -241,7 +235,7 @@ const metadata = await readZeroGJSON<AgentRegistrationFile>(
 
 ### `@open-agents-toolkit/compute`
 
-0G ai inference and re-encryption oracle.
+0G Compute integration for AI inference and TEE re-encryption oracle.
 
 #### AI inference
 
@@ -301,60 +295,64 @@ The `apps/dashboard` Next.js 15 app is the primary UI.
 - Node.js ≥ 20
 - npm ≥ 10
 
+### 1. Install dependencies
+
 ```bash
 npm install
-```
-
-### Build packages
-
-```bash
 cd packages && npm run build
 ```
 
-### Run contract tests
+### 2. Configure environment
+
+```bash
+cd apps/dashboard
+cp .env.example .env
+# Edit .env with your contract addresses, 0G RPC, and wallet key
+```
+
+Auto-populate contract addresses from a local deployment:
+
+```bash
+cd contracts
+npm run setup-env
+```
+
+### 3. Run contract tests
 
 ```bash
 cd contracts && npm test
 ```
 
-### Deploy contracts
+### 4. Deploy contracts
 
-**0G Galileo testnet** (Chain ID 16602):
+**0G Galileo testnet** (Chain ID 16602, tokens: https://faucet.0g.ai):
 
 ```bash
-# Tokens: https://faucet.0g.ai
 npm run deploy:zeroG
 ```
 
 **Sepolia:**
 
 ```bash
-  npm run deploy:sepolia
+npm run deploy:sepolia
 ```
 
-### Register a TEE oracle
+### 5. Register a TEE oracle signing key
 
 ```bash
-  npm run addOracle:zeroG
+npm run addOracle:zeroG
 ```
 
-### Register a Keeper address that can act as a contract admin
+### 6. Set a KeeperHub address for cross-chain ENS ownership mirroring
 
 ```bash
-  npm run setKeeper:zeroG
+npm run setKeeper:zeroG
 ```
 
-### Run the dashboard
+### 7. Start the dashboard
 
 ```bash
-cd apps/dashboard
-cp .env.example .env
-npm run dev
-
-
-# Auto-populate contract addresses from latest deployment
-cd ../../contracts
-npm run setup-env
+cd apps/dashboard && npm run dev
 ```
 
 ---

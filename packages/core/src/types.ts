@@ -3,86 +3,7 @@
  * All blockchain types use viem's primitives for consistency and type safety.
  */
 
-import type { Address, Hash, Hex } from "viem";
-
-// ─── Wallet / Chain ──────────────────────────────────────────────────────────
-
-/** Supported EVM chain IDs */
-export type ChainId = number;
-
-/** A wallet transaction request (EIP-1193 compatible subset) */
-export interface TransactionRequest {
-  readonly to: Address;
-  readonly value?: bigint;
-  readonly data?: Hex;
-  readonly gasLimit?: bigint;
-  readonly maxFeePerGas?: bigint;
-  readonly maxPriorityFeePerGas?: bigint;
-  readonly nonce?: number;
-}
-
-/** Result of a submitted transaction */
-export interface TransactionResult {
-  readonly hash: Hash;
-}
-
-/** Wallet connection state machine */
-export type WalletConnectionState =
-  | { status: "disconnected" }
-  | { status: "connecting" }
-  | { status: "connected"; address: Address; chainId: ChainId }
-  | { status: "error"; error: WalletError };
-
-/** Wallet session stored in the encrypted local store */
-export interface WalletSession {
-  readonly connectionMethod: "eip6963" | "walletconnect";
-  readonly address: Address;
-  readonly chainId: ChainId;
-  /** Opaque serialised session data (e.g. WalletConnect topic + keys) */
-  readonly sessionData?: string;
-  readonly connectedAt: number;
-}
-
-// ─── EIP-712 ─────────────────────────────────────────────────────────────────
-
-export interface EIP712Domain {
-  readonly name: string;
-  readonly version: string;
-  readonly chainId: ChainId;
-  readonly verifyingContract?: Address;
-  readonly salt?: Hex;
-}
-
-export interface EIP712TypeField {
-  readonly name: string;
-  readonly type: string;
-}
-
-export type EIP712Types = Record<string, readonly EIP712TypeField[]>;
-
-export interface EIP712TypedData<T extends Record<string, unknown>> {
-  readonly domain: EIP712Domain;
-  readonly types: EIP712Types;
-  readonly primaryType: string;
-  readonly message: T;
-}
-
-// ─── Signed Requests (ERC-8128 / EIP-712) ────────────────────────────────────
-
-/** The canonical signed request envelope */
-export interface SignedRequest<TPayload = unknown> {
-  readonly payload: TPayload;
-  readonly chainId: ChainId;
-  readonly agentAddress: Address;
-  readonly timestamp: number;
-  readonly nonce: string;
-  readonly signature: Hex;
-}
-
-/** Result of a signature verification */
-export type VerificationResult =
-  | { valid: true; signerAddress: Address }
-  | { valid: false; reason: string };
+import type { Address, Hex } from "viem";
 
 // ─── Agent Identity / Registry (ERC-8004) ────────────────────────────────────
 
@@ -106,7 +27,11 @@ export interface AgentRegistrationFile {
   readonly services: readonly AgentService[];
   readonly x402Support?: boolean;
   readonly active?: boolean;
-  readonly supportedTrust?: readonly ("reputation" | "crypto-economic" | "tee-attestation")[];
+  readonly supportedTrust?: readonly (
+    | "reputation"
+    | "crypto-economic"
+    | "tee-attestation"
+  )[];
   readonly wallet?: Address;
   readonly owner?: Address;
   /** IPFS CID or HTTP URL */
@@ -195,7 +120,10 @@ export interface AgentNFTRecord {
   readonly tokenId: bigint;
   readonly owner: Address;
   readonly publicMetadataUri: string;
-  readonly intelligentData: readonly Pick<AgentNFTEncryptedData, "name" | "hash">[];
+  readonly intelligentData: readonly Pick<
+    AgentNFTEncryptedData,
+    "name" | "hash"
+  >[];
   readonly verifierContract: Address;
   readonly mintedAt: number;
 }
@@ -209,25 +137,6 @@ export interface IPFSUploadResult {
 }
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
-
-export type WalletErrorCode =
-  | "USER_REJECTED"
-  | "CHAIN_UNSUPPORTED"
-  | "NO_PROVIDER"
-  | "PROVIDER_UNAVAILABLE"
-  | "WALLET_NOT_CONNECTED"
-  | "SIGN_ERROR"
-  | "SEND_ERROR"
-  | "SESSION_EXPIRED";
-
-export class WalletError extends Error {
-  readonly code: WalletErrorCode;
-  constructor(code: WalletErrorCode, message: string, cause?: unknown) {
-    super(message, { cause });
-    this.name = "WalletError";
-    this.code = code;
-  }
-}
 
 export type RegistryErrorCode =
   | "AGENT_NOT_FOUND"
